@@ -336,25 +336,37 @@ with tab2:
         st.divider()
         st.markdown("#### Détail des règles")
 
-        for issue in validation_result.issues:
-            icon = "✅" if issue.severity == "OK" else ("⚠️" if issue.severity == "WARNING" else "❌")
-            color = "#1a7a4a" if issue.severity == "OK" else ("#b8860b" if issue.severity == "WARNING" else "#c0392b")
-            bg = "#f0fff4" if issue.severity == "OK" else ("#fffbf0" if issue.severity == "WARNING" else "#fff0f0")
-    
-    st.markdown(f"""
-    <div style="
-        background-color: {bg};
-        border-left: 4px solid {color};
-        border-radius: 6px;
-        padding: 10px 16px;
-        margin-bottom: 8px;
-        color: #1a1a1a;
-        font-size: 0.9rem;
-    ">
-        {icon} <strong style="color: {color};">[{issue.rule_id}]</strong> 
-        <span style="color: #333333;">{issue.description}</span>
-    </div>
-    """, unsafe_allow_html=True)
+        # Combiner erreurs + warnings en une seule liste
+        all_issues = result.errors + result.warnings
+
+        if not all_issues:
+            st.success("✅ Toutes les règles sont respectées !")
+        else:
+            for issue in all_issues:
+                # Déterminer le style selon la sévérité
+                if issue.severity == "OK":
+                    icon  = "✅"
+                    color = "#1a7a4a"
+                    bg    = "#f0fff4"
+                elif issue.severity == "WARNING":
+                    icon  = "⚠️"
+                    color = "#b8860b"
+                    bg    = "#fffbf0"
+                else:
+                    icon  = "❌"
+                    color = "#c0392b"
+                    bg    = "#fff0f0"
+
+                # ⚠️ html ET st.markdown DOIVENT être dans la boucle (indentés)
+                html = (
+                    '<div style="background-color:' + bg + ';'
+                    'border-left:4px solid ' + color + ';'
+                    'border-radius:6px;padding:10px 16px;margin-bottom:8px;">'
+                    + icon + ' <strong style="color:' + color + ';">[' + issue.rule_id + ']</strong> '
+                    '<span style="color:#333333;">' + issue.description + '</span>'
+                    '</div>'
+                )
+                st.markdown(html, unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════
