@@ -1,0 +1,16 @@
+# requirements.txt
+streamlit>=1.32.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# PDF/A-3 avec XML embarqué (vrai Factur-X)
+factur-x>=2.0.0
+reportlab>=4.0.0
+pikepdf>=8.0.0
+
+# Validation XSD officielle (optionnel mais recommandé)
+lxml>=4.9.0
+
+# Tests
+pytest>=7.0.0
+pytest-cov>=4.0.0
