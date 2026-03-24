@@ -337,9 +337,9 @@ with tab2:
         st.markdown("#### Détail des règles")
 
         for issue in validation_result.issues:
-    icon = "✅" if issue.severity == "OK" else ("⚠️" if issue.severity == "WARNING" else "❌")
-    color = "#1a7a4a" if issue.severity == "OK" else ("#b8860b" if issue.severity == "WARNING" else "#c0392b")
-    bg = "#f0fff4" if issue.severity == "OK" else ("#fffbf0" if issue.severity == "WARNING" else "#fff0f0")
+            icon = "✅" if issue.severity == "OK" else ("⚠️" if issue.severity == "WARNING" else "❌")
+            color = "#1a7a4a" if issue.severity == "OK" else ("#b8860b" if issue.severity == "WARNING" else "#c0392b")
+            bg = "#f0fff4" if issue.severity == "OK" else ("#fffbf0" if issue.severity == "WARNING" else "#fff0f0")
     
     st.markdown(f"""
     <div style="
