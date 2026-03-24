@@ -336,21 +336,25 @@ with tab2:
         st.divider()
         st.markdown("#### Détail des règles")
 
-        for issue in result.issues:
-            severity_class = {
-                "ERROR": "rule-error",
-                "WARNING": "rule-warning",
-                "INFO": "rule-info",
-            }.get(issue.severity, "")
-
-            icon = {"ERROR": "❌", "WARNING": "⚠️", "INFO": "✅"}.get(issue.severity, "")
-            sug_html = f"<br><small>💡 {issue.suggestion}</small>" if issue.suggestion else ""
-
-            st.markdown(f"""
-<div class="chorus-step {severity_class}">
-    {icon} <strong>[{issue.rule_id}]</strong> {issue.message}{sug_html}
-</div>
-""", unsafe_allow_html=True)
+        for issue in validation_result.issues:
+    icon = "✅" if issue.severity == "OK" else ("⚠️" if issue.severity == "WARNING" else "❌")
+    color = "#1a7a4a" if issue.severity == "OK" else ("#b8860b" if issue.severity == "WARNING" else "#c0392b")
+    bg = "#f0fff4" if issue.severity == "OK" else ("#fffbf0" if issue.severity == "WARNING" else "#fff0f0")
+    
+    st.markdown(f"""
+    <div style="
+        background-color: {bg};
+        border-left: 4px solid {color};
+        border-radius: 6px;
+        padding: 10px 16px;
+        margin-bottom: 8px;
+        color: #1a1a1a;
+        font-size: 0.9rem;
+    ">
+        {icon} <strong style="color: {color};">[{issue.rule_id}]</strong> 
+        <span style="color: #333333;">{issue.description}</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════
