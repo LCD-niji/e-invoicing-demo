@@ -1,3 +1,5 @@
 ".env" 
 "__pycache__/" 
 "*.xml"   # ne pas committer les factures de test
+.gitignore
+.env.example
