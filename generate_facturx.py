@@ -2,25 +2,36 @@
 generate_facturx.py
 --------------------
 Assemble le PDF visuel + le XML CII en un fichier Factur-X PDF/A-3b.
-Le XML est embarqué dans le PDF avec les métadonnées XMP obligatoires.
-
-Usage :
-    from generate_facturx import build_facturx
-    pdf_bytes = build_facturx(invoice, xml_string)
-
-    # Ou depuis un XML existant :
-    pdf_bytes = build_facturx_from_xml(xml_string, profile="EN16931")
 """
 from __future__ import annotations
 
 from io import BytesIO
 
-import facturx
-
 from generate_invoice import Invoice, PROFILES
 from generate_pdf import render_invoice_pdf
 
-# Map profil Factur-X → niveau attendu par la lib
+# ── Import facturx — gestion multi-versions ────────────────
+try:
+    from facturx import generate_facturx_from_file as _facturx_gen
+except (ImportError, AttributeError):
+    try:
+        from facturx.main import generate_facturx_from_file as _facturx_gen
+    except (ImportError, AttributeError):
+        _facturx_gen = None
+
+# ── Fallback pypdf si facturx indisponible ─────────────────
+def _embed_xml_pypdf(pdf_bytes: bytes, xml_bytes: bytes) -> bytes:
+    """Embedding basique via pypdf (sans XMP Factur-X — fallback)."""
+    from pypdf import PdfWriter, PdfReader
+    reader = PdfReader(BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    writer.append(reader)
+    writer.add_attachment("factur-x.xml", xml_bytes)
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 FACTURX_LEVELS = {
     "MINIMUM":  "minimum",
     "BASIC_WL": "basicwl",
@@ -31,56 +42,49 @@ FACTURX_LEVELS = {
 
 
 def build_facturx(invoice: Invoice, xml_string: str) -> bytes:
-    """
-    Génère un Factur-X complet (PDF/A-3b + XML CII embarqué)
-    à partir d'un objet Invoice et du XML CII déjà généré.
-    """
-    # 1. Générer le PDF visuel
+    """Génère un Factur-X complet (PDF/A-3b + XML CII embarqué)."""
     pdf_bytes = render_invoice_pdf(invoice)
+    xml_bytes = xml_string.encode("utf-8")
+    level     = FACTURX_LEVELS.get(invoice.profile, "en16931")
 
-    # 2. Embarquer le XML dans le PDF → Factur-X
-    level = FACTURX_LEVELS.get(invoice.profile, "en16931")
-
-    facturx_pdf = facturx.generate_facturx_from_file(
-        pdf_io=BytesIO(pdf_bytes),
-        xml=xml_string.encode("utf-8"),
-        facturx_level=level,
-        lang="fr",
-        check_xsd=False,           # validation XSD déjà faite en amont
-    )
-    return facturx_pdf
+    if _facturx_gen:
+        return _facturx_gen(
+            pdf_io=BytesIO(pdf_bytes),
+            xml=xml_bytes,
+            facturx_level=level,
+            lang="fr",
+            check_xsd=False,
+        )
+    else:
+        return _embed_xml_pypdf(pdf_bytes, xml_bytes)
 
 
 def build_facturx_from_xml(xml_string: str, profile: str = "EN16931") -> bytes:
-    """
-    Génère un Factur-X à partir d'un XML CII existant.
-    Crée un PDF minimaliste (page de garde) pour envelopper le XML.
-    Utile pour convertir un XML conforme en Factur-X sans formulaire.
-    """
+    """Génère un Factur-X à partir d'un XML CII existant."""
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     import xml.etree.ElementTree as ET
 
-    # Extraire le numéro de facture depuis le XML pour le titre
+    # Extraire le numéro depuis le XML
     try:
-        root = ET.fromstring(xml_string)
-        ns = {"rsm": "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100",
-              "ram": "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"}
-        inv_id = root.find(".//rsm:ExchangedDocument/ram:ID", ns)
-        inv_num = inv_id.text if inv_id is not None else "N/A"
+        root   = ET.fromstring(xml_string)
+        ns     = {"rsm": "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100",
+                  "ram": "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"}
+        el     = root.find(".//rsm:ExchangedDocument/ram:ID", ns)
+        inv_num = el.text if el is not None else "N/A"
     except Exception:
         inv_num = "N/A"
 
-    # PDF minimaliste — page de garde
+    # Page de garde minimale
     buf    = BytesIO()
     styles = getSampleStyleSheet()
     doc    = SimpleDocTemplate(buf, pagesize=A4,
                                leftMargin=20*mm, rightMargin=20*mm,
                                topMargin=30*mm, bottomMargin=20*mm)
-    story = [
-        Paragraph(f"<b>Facture électronique Factur-X</b>", styles["Heading1"]),
+    doc.build([
+        Paragraph("<b>Facture électronique Factur-X</b>", styles["Heading1"]),
         Spacer(1, 6*mm),
         Paragraph(f"Numéro : <b>{inv_num}</b>", styles["Normal"]),
         Spacer(1, 4*mm),
@@ -89,15 +93,18 @@ def build_facturx_from_xml(xml_string: str, profile: str = "EN16931") -> bytes:
         Paragraph("Le fichier XML CII conforme EN 16931 est embarqué dans ce PDF.", styles["Normal"]),
         Spacer(1, 2*mm),
         Paragraph(f"Profil : {profile}", styles["Normal"]),
-    ]
-    doc.build(story)
+    ])
     pdf_bytes = buf.getvalue()
+    xml_bytes = xml_string.encode("utf-8")
+    level     = FACTURX_LEVELS.get(profile, "en16931")
 
-    level = FACTURX_LEVELS.get(profile, "en16931")
-    return facturx.generate_facturx_from_file(
-        pdf_io=BytesIO(pdf_bytes),
-        xml=xml_string.encode("utf-8"),
-        facturx_level=level,
-        lang="fr",
-        check_xsd=False,
-    )
+    if _facturx_gen:
+        return _facturx_gen(
+            pdf_io=BytesIO(pdf_bytes),
+            xml=xml_bytes,
+            facturx_level=level,
+            lang="fr",
+            check_xsd=False,
+        )
+    else:
+        return _embed_xml_pypdf(pdf_bytes, xml_bytes)
