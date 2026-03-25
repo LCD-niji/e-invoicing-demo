@@ -66,6 +66,18 @@ class ValidationResult:
     def is_valid(self) -> bool:
         return len(self.errors) == 0
     
+    @property
+    def summary(self) -> str:
+        status = "✅ VALIDE" if self.is_valid else "❌ INVALIDE"
+        return (
+            f"\n{'─'*60}\n"
+            f"  Fichier  : {self.xml_file}\n"
+            f"  Statut   : {status}\n"
+            f"  Erreurs  : {len(self.errors)}\n"
+            f"  Avertiss.: {len(self.warnings)}\n"
+            f"{'─'*60}"
+        )
+        
 
 # ─────────────────────────────────────────────
 # Namespaces
