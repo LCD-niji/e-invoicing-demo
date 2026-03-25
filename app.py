@@ -24,6 +24,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from schematron_validator import validate_en16931, SchematronResult
+from rules_engine.ai_validator import AiValidator, AiResult
 
 # Ajouter le répertoire parent au path pour importer les modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -500,6 +501,71 @@ with tab2:
     </a>
 </div>
 """, unsafe_allow_html=True)
+        
+# ── Validation Annexe 7 DGFiP (rules.json) ────────────────
+st.divider()
+st.markdown("#### 📋 Annexe 7 DGFiP — 235 règles officielles v1.8")
+
+rules_path = Path("rules_engine/rules.json")
+if not rules_path.exists():
+    st.warning("⚠️ rules_engine/rules.json introuvable")
+else:
+    with st.spinner("Évaluation des règles Annexe 7 DGFiP..."):
+        ai_val    = AiValidator(rules_path)
+        ai_result = ai_val.validate(tmp_path)
+
+    nb_tested  = len(ai_result.errors) + len(ai_result.warnings) + len(ai_result.infos)
+    nb_skipped = len(ai_result.skipped)
+
+    col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns(5)
+    col_a1.metric("Statut Annexe 7", "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
+    col_a2.metric("Règles testées",  nb_tested)
+    col_a3.metric("Erreurs",         len(ai_result.errors))
+    col_a4.metric("Warnings",        len(ai_result.warnings))
+    col_a5.metric("Non testables",   nb_skipped)
+
+    # Erreurs
+    for issue in ai_result.errors:
+        html = (
+            '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
+            'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+            '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
+            '<span style="color:#333333;">' + issue.message + '</span>'
+            '<br><small style="color:#888;">BT : ' + issue.bt + ' · ' + issue.source + '</small>'
+            '</div>'
+        )
+        st.markdown(html, unsafe_allow_html=True)
+
+    # Warnings
+    for issue in ai_result.warnings:
+        html = (
+            '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
+            'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+            '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
+            '<span style="color:#333333;">' + issue.message + '</span>'
+            '</div>'
+        )
+        st.markdown(html, unsafe_allow_html=True)
+
+    # Règles OK
+    with st.expander(f"✅ {len(ai_result.infos)} règles Annexe 7 passées"):
+        for issue in ai_result.infos:
+            html = (
+                '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
+                'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
+                '✅ <strong style="color:#1a7a4a;">[' + issue.rule_id + ']</strong> '
+                '<span style="color:#333333;font-size:0.9rem;">' + issue.message + '</span>'
+                '</div>'
+            )
+            st.markdown(html, unsafe_allow_html=True)
+
+    # Règles skippées (dans expander discret)
+    with st.expander(f"⏭️ {nb_skipped} règles non testables localement"):
+        st.caption("Ces règles nécessitent le PPF/annuaire ou sont couvertes par le Schematron CEN.")
+        for issue in ai_result.skipped:
+            st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
+
+    st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
