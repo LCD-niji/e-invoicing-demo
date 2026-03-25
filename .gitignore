@@ -1,5 +1,14 @@
-".env" 
-"__pycache__/" 
-"*.xml"   # ne pas committer les factures de test
-.gitignore
-.env.example
+# Credentials — ne jamais committer
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Factures de test (XML générés dynamiquement)
+*.xml
+
+# Streamlit
+.streamlit/secrets.toml

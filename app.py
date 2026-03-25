@@ -23,6 +23,7 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+from schematron_validator import validate_en16931, SchematronResult
 
 # Ajouter le répertoire parent au path pour importer les modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -333,41 +334,58 @@ with tab2:
         else:
             st.error(f"La facture comporte {len(result.errors)} erreur(s) bloquante(s)")
 
+
         st.divider()
-        st.markdown("#### Détail des règles")
+        st.markdown("#### 🇪🇺 Validation EN 16931 officielle (CEN/TC 434)")
 
-        # Combiner erreurs + warnings en une seule liste
-        all_issues = result.errors + result.warnings
+        with st.spinner("Application des règles Schematron CEN..."):
+            sch_result: SchematronResult = validate_en16931(tmp_path)
 
-        if not all_issues:
-            st.success("✅ Toutes les règles sont respectées !")
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric(
+            "Statut EN16931",
+            "✅ CONFORME" if sch_result.is_valid else "❌ NON CONFORME"
+        )
+        col_s2.metric("Erreurs BR-*", len(sch_result.errors))
+        col_s3.metric("Warnings BR-*", len(sch_result.warnings))
+
+        if sch_result.is_valid:
+            st.success("🎉 Conforme à la norme européenne EN 16931 (CEN/TC 434) !")
         else:
-            for issue in all_issues:
-                # Déterminer le style selon la sévérité
-                if issue.severity == "OK":
-                    icon  = "✅"
-                    color = "#1a7a4a"
-                    bg    = "#f0fff4"
-                elif issue.severity == "WARNING":
-                    icon  = "⚠️"
-                    color = "#b8860b"
-                    bg    = "#fffbf0"
-                else:
-                    icon  = "❌"
-                    color = "#c0392b"
-                    bg    = "#fff0f0"
-
-                # ⚠️ html ET st.markdown DOIVENT être dans la boucle (indentés)
+            # Afficher les erreurs
+            for issue in sch_result.errors:
                 html = (
-                    '<div style="background-color:' + bg + ';'
-                    'border-left:4px solid ' + color + ';'
-                    'border-radius:6px;padding:10px 16px;margin-bottom:8px;">'
-                    + icon + ' <strong style="color:' + color + ';">[' + issue.rule_id + ']</strong> '
-                    '<span style="color:#333333;">' + issue.description + '</span>'
+                    '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
+                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
+                    '<span style="color:#333;">' + issue.message + '</span>'
+                    '<br><small style="color:#888;">📍 ' + issue.location + '</small>'
                     '</div>'
                 )
                 st.markdown(html, unsafe_allow_html=True)
 
+        # Afficher les warnings dans un expander
+        if sch_result.warnings:
+            with st.expander(f"⚠️ {len(sch_result.warnings)} avertissement(s) EN16931"):
+                for issue in sch_result.warnings:
+                    html = (
+                        '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
+                        'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                        '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
+                        '<span style="color:#333;">' + issue.message + '</span>'
+                        '</div>'
+                    )
+                    st.markdown(html, unsafe_allow_html=True)
+
+        # Badge de source officielle
+        st.markdown("""
+        <div style="text-align:right;font-size:0.75rem;color:#888;margin-top:4px;">
+            Source : 
+            <a href="https://github.com/ConnectingEurope/eInvoicing-EN16931" target="_blank">
+                CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
