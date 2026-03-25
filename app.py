@@ -290,7 +290,6 @@ with tab1:
         except Exception as e:
             st.error(f"❌ Erreur lors de la génération : {e}")
 
-
 # ═══════════════════════════════════════════
 # TAB 2 — Validation
 # ═══════════════════════════════════════════
@@ -314,23 +313,24 @@ with tab2:
         if uploaded:
             content = uploaded.read()
             try:
-                xml_to_validate = content.decode("utf-8-sig")  # utf-8-sig = UTF-8 + BOM auto-stripped
+                xml_to_validate = content.decode("utf-8-sig")
             except UnicodeDecodeError:
                 xml_to_validate = content.decode("latin-1")
 
+    # ── Initialisation — obligatoire en Streamlit ──────────────
+    result     = None
+    sch_result = None
+
     if xml_to_validate and st.button("🔍 Valider la facture", type="primary", use_container_width=True):
-        # Sauvegarde temporaire pour validation
+
         tmp_path = "/tmp/facture_validation.xml"
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(xml_to_validate)
 
+        # ── Validation DGFiP ───────────────────────────────────
         validator = InvoiceValidator(tmp_path)
-        result = validator.validate()
-        # DEBUG — à retirer après
-        st.write("Erreurs brutes :", result.errors)
-        st.write("Warnings bruts :", result.warnings)
+        result    = validator.validate()
 
-        # Résumé
         col_v1, col_v2, col_v3 = st.columns(3)
         col_v1.metric("Statut", "✅ VALIDE" if result.is_valid else "❌ INVALIDE")
         col_v2.metric("Erreurs", len(result.errors))
@@ -341,57 +341,82 @@ with tab2:
         else:
             st.error(f"La facture comporte {len(result.errors)} erreur(s) bloquante(s)")
 
-
         st.divider()
-        st.markdown("#### Détail des règles")
+        st.markdown("#### Détail des règles DGFiP")
 
-        # ── Erreurs bloquantes ─────────────────────────────────────
-        if result.errors:
-            for issue in result.errors:
-                html = (
-                    '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
-                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                    '❌ <strong style="color:#c0392b;">[' + str(getattr(issue, "rule_id", "?")) + ']</strong> '
-                    '<span style="color:#333;">' + str(getattr(issue, "description", getattr(issue, "message", str(issue)))) + '</span>'
-                    '</div>'
-                )
-                st.markdown(html, unsafe_allow_html=True)
+        # Erreurs bloquantes
+        for issue in result.errors:
+            rule_id = str(getattr(issue, "rule_id", getattr(issue, "code", "?")))
+            message = str(getattr(issue, "description", getattr(issue, "message", str(issue))))
+            html = (
+                '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
+                'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                '❌ <strong style="color:#c0392b;">[' + rule_id + ']</strong> '
+                '<span style="color:#333333;">' + message + '</span>'
+                '</div>'
+            )
+            st.markdown(html, unsafe_allow_html=True)
 
-        # ── Warnings ───────────────────────────────────────────────
-        if result.warnings:
-            for issue in result.warnings:
-                html = (
-                    '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
-                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                    '⚠️ <strong style="color:#b8860b;">[' + str(getattr(issue, "rule_id", "?")) + ']</strong> '
-                    '<span style="color:#333;">' + str(getattr(issue, "description", getattr(issue, "message", str(issue)))) + '</span>'
-                    '</div>'
-                )
-                st.markdown(html, unsafe_allow_html=True)
+        # Warnings
+        for issue in result.warnings:
+            rule_id = str(getattr(issue, "rule_id", getattr(issue, "code", "?")))
+            message = str(getattr(issue, "description", getattr(issue, "message", str(issue))))
+            html = (
+                '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
+                'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                '⚠️ <strong style="color:#b8860b;">[' + rule_id + ']</strong> '
+                '<span style="color:#333333;">' + message + '</span>'
+                '</div>'
+            )
+            st.markdown(html, unsafe_allow_html=True)
 
-        # ── Règles passées (synthèse) ──────────────────────────────
-        nb_total  = getattr(result, "total_checks", 20)
-        nb_errors = len(result.errors)
-        nb_warn   = len(result.warnings)
-        nb_ok     = nb_total - nb_errors - nb_warn
-
-        with st.expander(f"✅ {max(nb_ok, 0)} règle(s) passée(s) avec succès"):
-            # Afficher les items OK si le validateur les expose
-            ok_items = getattr(result, "infos", getattr(result, "ok_rules", []))
+        # Règles OK
+        ok_items = getattr(result, "infos", getattr(result, "ok_rules", []))
+        with st.expander(f"✅ {len(ok_items)} règle(s) passée(s) avec succès"):
             if ok_items:
                 for issue in ok_items:
+                    rule_id = str(getattr(issue, "rule_id", getattr(issue, "code", "?")))
+                    message = str(getattr(issue, "description", getattr(issue, "message", str(issue))))
                     html = (
                         '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
                         'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
-                        '✅ <strong style="color:#1a7a4a;">[' + str(getattr(issue, "rule_id", "?")) + ']</strong> '
-                        '<span style="color:#333;">' + str(getattr(issue, "description", getattr(issue, "message", str(issue)))) + '</span>'
+                        '✅ <strong style="color:#1a7a4a;">[' + rule_id + ']</strong> '
+                        '<span style="color:#333333;">' + message + '</span>'
                         '</div>'
                     )
                     st.markdown(html, unsafe_allow_html=True)
             else:
-                st.info("Active les logs OK dans `validate_invoice.py` pour voir le détail des règles passées.")
+                st.caption("Active les logs OK dans validate_invoice.py pour le détail.")
 
-        # Afficher les warnings dans un expander
+        # ── Validation EN16931 Schematron CEN ──────────────────
+        st.divider()
+        st.markdown("#### 🇪🇺 Validation EN 16931 officielle (CEN/TC 434)")
+
+        with st.spinner("Application des règles Schematron CEN v1.3.15..."):
+            sch_result = validate_en16931(tmp_path)
+
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric(
+            "Statut EN16931",
+            "✅ CONFORME" if sch_result.is_valid else "❌ NON CONFORME"
+        )
+        col_s2.metric("Erreurs BR-*", len(sch_result.errors))
+        col_s3.metric("Warnings BR-*", len(sch_result.warnings))
+
+        if sch_result.is_valid:
+            st.success("🎉 Conforme à la norme européenne EN 16931 (CEN/TC 434) !")
+        else:
+            for issue in sch_result.errors:
+                html = (
+                    '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
+                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
+                    '<span style="color:#333333;">' + issue.message + '</span>'
+                    '<br><small style="color:#888;font-size:0.75rem;">📍 ' + issue.location + '</small>'
+                    '</div>'
+                )
+                st.markdown(html, unsafe_allow_html=True)
+
         if sch_result.warnings:
             with st.expander(f"⚠️ {len(sch_result.warnings)} avertissement(s) EN16931"):
                 for issue in sch_result.warnings:
@@ -399,20 +424,19 @@ with tab2:
                         '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
                         'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
                         '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
-                        '<span style="color:#333;">' + issue.message + '</span>'
+                        '<span style="color:#333333;">' + issue.message + '</span>'
                         '</div>'
                     )
                     st.markdown(html, unsafe_allow_html=True)
 
-        # Badge de source officielle
         st.markdown("""
-        <div style="text-align:right;font-size:0.75rem;color:#888;margin-top:4px;">
-            Source : 
-            <a href="https://github.com/ConnectingEurope/eInvoicing-EN16931" target="_blank">
-                CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15
-            </a>
-        </div>
-        """, unsafe_allow_html=True)
+<div style="text-align:right;font-size:0.75rem;color:#888;margin-top:4px;">
+    Source :
+    <a href="https://github.com/ConnectingEurope/eInvoicing-EN16931" target="_blank">
+        CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15
+    </a>
+</div>
+""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
