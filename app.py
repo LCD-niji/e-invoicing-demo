@@ -378,9 +378,12 @@ with tab2:
             pdf_bytes = uploaded_pdf.read()
             try:
                 xml_to_validate, detected_profile = extract_xml_from_facturx(pdf_bytes)
-                st.success(f"✅ XML extrait — Profil : **{detected_profile}**")
-                with st.expander("📄 Aperçu du XML extrait (50 premières lignes)"):
-                    st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
+                st.success(f"✅ XML extrait — {len(xml_to_validate)} caractères — Profil : {detected_profile}")
+                # DEBUG — à supprimer après vérification
+                st.code(xml_to_validate[:500], language="xml")                
+                #st.success(f"✅ XML extrait — Profil : **{detected_profile}**")
+                #with st.expander("📄 Aperçu du XML extrait (50 premières lignes)"):
+                #    st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
                 st.download_button(
                     label="⬇️ Télécharger le XML extrait",
                     data=xml_to_validate.encode("utf-8"),
