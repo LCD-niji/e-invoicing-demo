@@ -8,6 +8,7 @@ Couverture :
   - Présence     : nœud XPath existe et a une valeur
   - Format       : SIRET (14 chiffres), TVA FR, date YYYYMMDD, ISO
   - Codelist     : TypeCode, CategoryCode TVA, CountryID
+  - Conditionnel : TypeCode, catégorie TVA, BT trigger absent
   - Calcul       : délégués au Schematron CEN (champ "formula" présent)
 """
 from __future__ import annotations
@@ -61,7 +62,7 @@ BT_XPATH: dict[str, str] = {
     "BT-53":  "//ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CityName",
     "BT-54":  "//ram:BuyerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode",
     "BT-55":  "//ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CountryID",
-    # Livraison
+    # Livraison / Période
     "BT-72":  "//ram:ActualDeliverySupplyChainEvent/ram:OccurrenceDateTime/udt:DateTimeString",
     "BT-73":  "//ram:BillingSpecifiedPeriod/ram:StartDateTime/udt:DateTimeString",
     "BT-74":  "//ram:BillingSpecifiedPeriod/ram:EndDateTime/udt:DateTimeString",
@@ -114,21 +115,45 @@ FORMAT_CHECKS: dict[str, tuple[str, str]] = {
 }
 
 def _detect_format(bt: str, desc: str) -> Optional[str]:
-    """Détecte le type de format à partir du BT et de la description."""
     d = desc.lower()
-    if bt in ("BT-30", "BT-47") or "siret" in d:
-        return "siret"
-    if bt in ("BT-31", "BT-48") or "tva" in d and "fr" in d:
-        return "tva_fr"
-    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):
-        return "date8"
-    if bt in ("BT-5",):
-        return "iso3"
-    if bt in ("BT-40", "BT-55"):
-        return "iso2"
-    if bt in ("BT-84",) or "iban" in d:
-        return "iban"
+    if bt in ("BT-30", "BT-47") or "siret" in d:      return "siret"
+    if bt in ("BT-31", "BT-48") or ("tva" in d and "fr" in d): return "tva_fr"
+    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):     return "date8"
+    if bt in ("BT-5",):                                return "iso3"
+    if bt in ("BT-40", "BT-55"):                       return "iso2"
+    if bt in ("BT-84",) or "iban" in d:                return "iban"
     return None
+
+# ── Tables de conditions ───────────────────────────────────
+
+# Règle applicable seulement si ce BT est présent dans la facture
+SKIP_IF_BT_ABSENT: dict[str, str] = {
+    "BR-55":    "BT-25",
+    "BR-29":    "BT-73",
+    "G6.25":    "BT-73",
+    "BR-CO-19": "BT-73",
+    "G6.21":    "BT-121",
+    "BR-CL-22": "BT-121",
+}
+
+# Règle applicable seulement si TypeCode est dans l'ensemble
+SKIP_IF_NOT_TYPE: dict[str, set] = {
+    "G1.31": {"381", "384"},
+}
+
+# Règle applicable seulement si BT-118 = valeur spécifique
+SKIP_IF_VAT_NOT: dict[str, str] = {
+    "G1.41":    "E",
+    "BR-AE-10": "AE",
+    "BR-G-10":  "G",
+    "BR-IC-10": "K",
+    "BR-S-10":  "S",
+}
+
+# Règles inversées : le BT ne doit PAS être présent
+INVERT_CHECK: set[str] = {
+    "BR-S-10",
+}
 
 
 @dataclass
@@ -173,6 +198,8 @@ class AiValidator:
                         self.rules.append(rule)
 
     def _get_value(self, tree, xpath: str) -> Optional[str]:
+        if not xpath:
+            return None
         try:
             nodes = tree.xpath(xpath, namespaces=NS)
             if not nodes:
@@ -190,33 +217,87 @@ class AiValidator:
             result.issues.append(AiIssue("PARSE-ERR", f"XML invalide : {e}", "ERROR"))
             return result
 
+        # ── Contexte global de la facture ──────────────────
+        type_code = self._get_value(tree, BT_XPATH.get("BT-3",  "")) or ""
+        vat_code  = self._get_value(tree, BT_XPATH.get("BT-118","")) or ""
+
         for rule in self.rules:
             rule_id  = rule.get("id", "?")
             desc     = rule.get("desc", "")
             bt_raw   = rule.get("bt", "")
             category = rule.get("source", "Annexe 7 DGFiP v1.8")
+            severity = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
 
-            # ── Règles de calcul → déléguées au Schematron ─
+            # ── Règles de calcul → Schematron ──────────────
             if rule.get("formula"):
                 result.issues.append(AiIssue(
-                    rule_id=rule_id, message=f"{desc} (vérifiée par Schematron CEN)",
+                    rule_id=rule_id,
+                    message=f"{desc} (vérifiée par Schematron CEN)",
                     severity="SKIPPED", bt=bt_raw
                 ))
                 continue
 
-            # ── BT non mappé → non testable localement ─────
+            # ── Condition TypeCode ─────────────────────────
+            if rule_id in SKIP_IF_NOT_TYPE:
+                if type_code not in SKIP_IF_NOT_TYPE[rule_id]:
+                    result.issues.append(AiIssue(
+                        rule_id=rule_id,
+                        message=f"{desc} (non applicable — TypeCode={type_code or '?'})",
+                        severity="SKIPPED", bt=bt_raw
+                    ))
+                    continue
+
+            # ── Condition catégorie TVA ────────────────────
+            if rule_id in SKIP_IF_VAT_NOT:
+                if vat_code != SKIP_IF_VAT_NOT[rule_id]:
+                    result.issues.append(AiIssue(
+                        rule_id=rule_id,
+                        message=f"{desc} (non applicable — BT-118={vat_code or '?'})",
+                        severity="SKIPPED", bt=bt_raw
+                    ))
+                    continue
+
+            # ── BT non mappé ───────────────────────────────
             bt = bt_raw.split(",")[0].strip()
             xpath = BT_XPATH.get(bt, "")
             if not xpath:
                 result.issues.append(AiIssue(
-                    rule_id=rule_id, message=f"{desc} (BT non mappé — vérification PPF/annuaire)",
+                    rule_id=rule_id,
+                    message=f"{desc} (BT non mappé — vérification PPF/annuaire)",
                     severity="SKIPPED", bt=bt_raw
                 ))
                 continue
 
+            # ── Condition BT trigger absent ────────────────
+            if rule_id in SKIP_IF_BT_ABSENT:
+                trigger_xpath = BT_XPATH.get(SKIP_IF_BT_ABSENT[rule_id], "")
+                if not self._get_value(tree, trigger_xpath):
+                    result.issues.append(AiIssue(
+                        rule_id=rule_id,
+                        message=f"{desc} (non applicable — {SKIP_IF_BT_ABSENT[rule_id]} absent)",
+                        severity="SKIPPED", bt=bt_raw
+                    ))
+                    continue
+
             value = self._get_value(tree, xpath)
 
-            # ── Vérification codelist ───────────────────────
+            # ── Check inversé ──────────────────────────────
+            if rule_id in INVERT_CHECK:
+                if value:
+                    result.issues.append(AiIssue(
+                        rule_id=rule_id,
+                        message=f"{desc} — '{bt}' ne doit pas être renseigné",
+                        severity="ERROR", bt=bt_raw, source=category
+                    ))
+                else:
+                    result.issues.append(AiIssue(
+                        rule_id=rule_id,
+                        message=f"{desc} ✓ (absent comme attendu)",
+                        severity="INFO", bt=bt_raw, source=category
+                    ))
+                continue
+
+            # ── Codelist ───────────────────────────────────
             if bt in CODELISTS:
                 if not value:
                     result.issues.append(AiIssue(
@@ -236,7 +317,7 @@ class AiValidator:
                     ))
                 continue
 
-            # ── Vérification de format ──────────────────────
+            # ── Format ─────────────────────────────────────
             fmt = _detect_format(bt, desc)
             if fmt and value:
                 pattern, hint = FORMAT_CHECKS[fmt]
@@ -246,16 +327,14 @@ class AiValidator:
                         message=f"{desc} — format invalide : '{value}' ({hint})",
                         severity="WARNING", bt=bt_raw, source=category
                     ))
-                    continue
                 else:
                     result.issues.append(AiIssue(
                         rule_id=rule_id, message=f"{desc} ✓ ({value})",
                         severity="INFO", bt=bt_raw, source=category
                     ))
-                    continue
+                continue
 
-            # ── Vérification de présence ────────────────────
-            severity = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
+            # ── Présence ───────────────────────────────────
             if not value:
                 result.issues.append(AiIssue(
                     rule_id=rule_id, message=desc,
