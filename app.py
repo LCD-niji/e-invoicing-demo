@@ -312,7 +312,11 @@ with tab2:
     else:
         uploaded = st.file_uploader("Choisir un fichier XML Factur-X", type=["xml"])
         if uploaded:
-            xml_to_validate = uploaded.read().decode("utf-8")
+            content = uploaded.read()
+            try:
+                xml_to_validate = content.decode("utf-8-sig")  # utf-8-sig = UTF-8 + BOM auto-stripped
+            except UnicodeDecodeError:
+                xml_to_validate = content.decode("latin-1")
 
     if xml_to_validate and st.button("🔍 Valider la facture", type="primary", use_container_width=True):
         # Sauvegarde temporaire pour validation
