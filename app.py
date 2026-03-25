@@ -1,19 +1,18 @@
 """
 app.py
------------------
+------
 Dashboard Streamlit — Démo facturation électronique 2026
-Auteur : [Votre nom] — https://linkedin.com/in/[votre-profil]
 
 Fonctionnalités :
   ✅ Formulaire de saisie de facture
   ✅ Génération XML Factur-X (EN 16931)
+  ✅ Génération PDF/A-3b Factur-X complet
   ✅ Validation avec affichage des erreurs/warnings
+  ✅ Conversion XML CII → Factur-X PDF
   ✅ Simulation dépôt Chorus Pro
   ✅ Suivi de statut en temps réel
-  ✅ Téléchargement du fichier XML
 
 Lancement :
-    cd dashboard
     streamlit run app.py
 """
 
@@ -23,10 +22,10 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+
 from schematron_validator import validate_en16931, SchematronResult
 from rules_engine.ai_validator import AiValidator, AiResult
 
-# Ajouter le répertoire parent au path pour importer les modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
@@ -35,6 +34,8 @@ from generate_invoice import (
     Address, Invoice, InvoiceLine, Party,
     generate_facturx_xml, PROFILES
 )
+from generate_pdf import render_invoice_pdf
+from generate_facturx import build_facturx, build_facturx_from_xml
 from validate_invoice import InvoiceValidator
 from send_chorus import simulate_submission, simulate_status_progression, CHORUS_STATUS
 
@@ -50,7 +51,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# CSS personnalisé
 st.markdown("""
 <style>
     .main-header {
@@ -106,7 +106,7 @@ st.markdown("""
 
 
 # ─────────────────────────────────────────────
-# Sidebar — Paramètres
+# Sidebar
 # ─────────────────────────────────────────────
 
 with st.sidebar:
@@ -115,7 +115,7 @@ with st.sidebar:
     profile = st.selectbox(
         "Profil Factur-X",
         options=list(PROFILES.keys()),
-        index=3,  # EN16931 par défaut
+        index=3,
         help="EN16931 est recommandé pour les PME"
     )
 
@@ -138,7 +138,7 @@ Cette démo illustre une implémentation complète de la **réforme facturation 
 
 
 # ─────────────────────────────────────────────
-# Tabs principales
+# Tabs
 # ─────────────────────────────────────────────
 
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -179,7 +179,7 @@ with tab1:
             seller_cp   = st.text_input("CP", value="75001", key="s_cp")
         with col_s2:
             seller_city = st.text_input("Ville", value="Paris", key="s_city")
-        seller_iban    = st.text_input("IBAN (pour virement SEPA)", value="FR7630006000011234567890189", key="s_iban")
+        seller_iban    = st.text_input("IBAN (virement SEPA)", value="FR7630006000011234567890189", key="s_iban")
 
     with col_buy:
         st.markdown("#### 🏪 Acheteur (Client)")
@@ -211,7 +211,7 @@ with tab1:
         with cols[1]:
             qty = st.number_input("Qté", value=line["qty"], key=f"l_qty_{i}", min_value=0.0, step=0.5, label_visibility="collapsed")
         with cols[2]:
-            price = st.number_input("Prix unitaire HT (€)", value=line["price"], key=f"l_price_{i}", min_value=0.0, step=10.0, label_visibility="collapsed")
+            price = st.number_input("Prix HT (€)", value=line["price"], key=f"l_price_{i}", min_value=0.0, step=10.0, label_visibility="collapsed")
         with cols[3]:
             vat = st.selectbox("TVA %", options=[0.0, 5.5, 10.0, 20.0], index=3, key=f"l_vat_{i}", label_visibility="collapsed")
         with cols[4]:
@@ -224,7 +224,6 @@ with tab1:
         st.session_state.lines.append({"desc": "Nouvelle prestation", "qty": 1.0, "price": 500.0, "vat": 20.0})
         st.rerun()
 
-    # Calcul des totaux en temps réel
     if lines_data:
         total_ht  = sum(Decimal(str(l["qty"])) * Decimal(str(l["price"])) for l in lines_data)
         total_vat = sum(Decimal(str(l["qty"])) * Decimal(str(l["price"])) * Decimal(str(l["vat"])) / 100 for l in lines_data)
@@ -241,6 +240,7 @@ with tab1:
                           value="Merci pour votre confiance. Paiement par virement SEPA sous 30 jours.",
                           height=80)
 
+    # ── Génération XML ────────────────────────────────────
     if st.button("🔧 Générer la facture XML", type="primary", use_container_width=True):
         try:
             seller = Party(
@@ -273,13 +273,12 @@ with tab1:
             )
             xml_content = generate_facturx_xml(invoice)
             st.session_state["xml_content"] = xml_content
-            st.session_state["invoice_obj"] = invoice
+            st.session_state["invoice_obj"]  = invoice
             st.session_state["submission_id"] = None
             st.success("✅ Facture XML générée avec succès !")
 
             with st.expander("📄 Aperçu XML (100 premières lignes)"):
-                lines_preview = xml_content.split("\n")[:100]
-                st.code("\n".join(lines_preview), language="xml")
+                st.code("\n".join(xml_content.split("\n")[:100]), language="xml")
 
             st.download_button(
                 label="⬇️ Télécharger le fichier XML",
@@ -290,6 +289,30 @@ with tab1:
 
         except Exception as e:
             st.error(f"❌ Erreur lors de la génération : {e}")
+
+    # ── Génération Factur-X PDF/A-3 ───────────────────────
+    if "xml_content" in st.session_state and "invoice_obj" in st.session_state:
+        st.divider()
+        if st.button("📄 Générer le Factur-X complet (PDF/A-3b)", use_container_width=True):
+            with st.spinner("Génération du Factur-X PDF/A-3b..."):
+                try:
+                    fx_bytes = build_facturx(
+                        st.session_state["invoice_obj"],
+                        st.session_state["xml_content"]
+                    )
+                    inv_num = st.session_state["invoice_obj"].number
+                    st.download_button(
+                        label="⬇️ Télécharger le Factur-X (.pdf)",
+                        data=fx_bytes,
+                        file_name=f"{inv_num}.pdf",
+                        mime="application/pdf",
+                    )
+                    st.success("✅ Factur-X PDF/A-3b généré — XML CII embarqué dans le PDF")
+                    st.info("📌 Ce fichier contient le PDF lisible ET le XML légal. Il est conforme à la norme Factur-X pour la réforme 2026.")
+                except Exception as e:
+                    st.error(f"❌ Erreur PDF/A-3 : {e}")
+
+
 # ═══════════════════════════════════════════
 # TAB 2 — Validation
 # ═══════════════════════════════════════════
@@ -297,8 +320,13 @@ with tab1:
 with tab2:
     st.subheader("Validation de la facture")
 
-    xml_source = st.radio("Source", ["Facture générée ci-dessus", "Uploader un fichier XML"],
-                           horizontal=True)
+    xml_source = st.radio(
+        "Source",
+        ["Facture générée ci-dessus",
+         "Uploader un fichier XML",
+         "Convertir un XML CII en Factur-X PDF"],
+        horizontal=True
+    )
 
     xml_to_validate = None
 
@@ -308,7 +336,8 @@ with tab2:
             st.success("Facture chargée depuis l'étape précédente")
         else:
             st.warning("⚠️ Générez d'abord une facture dans l'onglet précédent")
-    else:
+
+    elif xml_source == "Uploader un fichier XML":
         uploaded = st.file_uploader("Choisir un fichier XML Factur-X", type=["xml"])
         if uploaded:
             content = uploaded.read()
@@ -317,7 +346,27 @@ with tab2:
             except UnicodeDecodeError:
                 xml_to_validate = content.decode("latin-1")
 
-    # Initialisation obligatoire Streamlit
+    elif xml_source == "Convertir un XML CII en Factur-X PDF":
+        st.info("Uploadez un XML CII conforme EN 16931 pour obtenir un Factur-X PDF/A-3b.")
+        uploaded_xml = st.file_uploader("Fichier XML CII", type=["xml"], key="xml_convert")
+        if uploaded_xml:
+            xml_str = uploaded_xml.read().decode("utf-8-sig", errors="replace")
+            profile_conv = st.selectbox("Profil", list(PROFILES.keys()), index=3, key="conv_profile")
+            if st.button("🔄 Convertir en Factur-X", type="primary"):
+                with st.spinner("Conversion en cours..."):
+                    try:
+                        fx_bytes = build_facturx_from_xml(xml_str, profile_conv)
+                        st.download_button(
+                            label="⬇️ Télécharger le Factur-X (.pdf)",
+                            data=fx_bytes,
+                            file_name=uploaded_xml.name.replace(".xml", "_facturx.pdf"),
+                            mime="application/pdf",
+                        )
+                        st.success("✅ Factur-X PDF/A-3b généré")
+                    except Exception as e:
+                        st.error(f"❌ Erreur conversion : {e}")
+
+    # ── Initialisation
     result     = None
     sch_result = None
     ai_result  = None
@@ -328,7 +377,7 @@ with tab2:
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(xml_to_validate)
 
-        # ── 1. Validation DGFiP (validate_invoice.py) ─────────
+        # ── 1. Validation DGFiP ────────────────────────────
         validator = InvoiceValidator(tmp_path)
         result    = validator.validate()
 
@@ -341,7 +390,7 @@ with tab2:
         col_v4.metric("Warnings", len(result.warnings))
 
         if result.is_valid:
-            st.success("🎉 La facture est conforme aux normes Factur-X et EN 16931 !")
+            st.success("🎉 La facture est conforme aux règles DGFiP !")
         else:
             st.error(f"La facture comporte {len(result.errors)} erreur(s) bloquante(s)")
 
@@ -368,7 +417,6 @@ with tab2:
             )
             st.markdown(html, unsafe_allow_html=True)
 
-        # ← ICI : hors de toute boucle
         ok_items = result.infos
         if ok_items:
             with st.expander(f"✅ {len(ok_items)} règle(s) DGFiP passée(s)"):
@@ -382,7 +430,7 @@ with tab2:
                     )
                     st.markdown(html, unsafe_allow_html=True)
 
-        # ── 2. Validation EN16931 Schematron CEN ───────────────
+        # ── 2. Validation Schematron CEN ───────────────────
         st.divider()
         st.markdown("#### 🇪🇺 Validation EN 16931 officielle (CEN/TC 434)")
 
@@ -486,7 +534,7 @@ with tab2:
     CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15</a>
 </div>""", unsafe_allow_html=True)
 
-        # ── 3. Validation Annexe 7 DGFiP (rules.json) ─────────
+        # ── 3. Validation Annexe 7 DGFiP ──────────────────
         st.divider()
         st.markdown("#### 📋 Annexe 7 DGFiP — 235 règles officielles v1.8")
 
@@ -547,6 +595,7 @@ with tab2:
 
             st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
 
+
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
 # ═══════════════════════════════════════════
@@ -567,19 +616,17 @@ Pour un vrai dépôt, configurez vos credentials PISTE dans `.env`.
                                     value="13000682900012",
                                     help="Ex : 13000682900012 = Ministère de l'Économie")
     with col_c2:
-        service_code = st.text_input("Code service (optionnel)", value="",
-                                      help="Code service de l'entité destinataire")
+        service_code = st.text_input("Code service (optionnel)", value="")
 
     if st.button("🚀 Déposer la facture", type="primary", use_container_width=True):
         if "xml_content" not in st.session_state:
             st.warning("⚠️ Générez d'abord une facture dans l'onglet 1")
         else:
-            tmp_path = "/tmp/facture_chorus.xml"
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            tmp_path_chorus = "/tmp/facture_chorus.xml"
+            with open(tmp_path_chorus, "w", encoding="utf-8") as f:
                 f.write(st.session_state["xml_content"])
 
             with st.spinner("Dépôt en cours..."):
-                # Affichage des étapes
                 steps_placeholder = st.empty()
                 steps = [
                     "🔐 Authentification OAuth2 PISTE",
@@ -594,19 +641,17 @@ Pour un vrai dépôt, configurez vos credentials PISTE dans `.env`.
                     ))
                     time.sleep(0.4)
 
-                result = simulate_submission(tmp_path)
+                result_chorus = simulate_submission(tmp_path_chorus)
                 steps_placeholder.empty()
 
-            if result.success:
-                st.success(f"✅ Facture déposée ! ID de dépôt : **{result.submission_id}**")
-                st.session_state["submission_id"] = result.submission_id
-
+            if result_chorus.success:
+                st.success(f"✅ Facture déposée ! ID de dépôt : **{result_chorus.submission_id}**")
+                st.session_state["submission_id"] = result_chorus.submission_id
                 st.markdown("#### 📋 Accusé de dépôt")
-                st.json(result.raw_response)
-
+                st.json(result_chorus.raw_response)
                 st.info("💡 Allez dans l'onglet **Statut & Suivi** pour suivre le traitement")
             else:
-                st.error(f"❌ Échec : {result.message}")
+                st.error(f"❌ Échec : {result_chorus.message}")
 
 
 # ═══════════════════════════════════════════
@@ -622,7 +667,6 @@ with tab4:
 
     if st.button("📊 Simuler la progression du statut", type="primary",
                   use_container_width=True, disabled=not submission_input):
-
         if not submission_input:
             st.warning("⚠️ Saisissez un ID de dépôt")
         else:
@@ -631,23 +675,19 @@ with tab4:
             status_placeholder = st.empty()
 
             statuses = simulate_status_progression(submission_input)
-            total = len(statuses)
+            total    = len(statuses)
+            history  = []
 
-            history = []
             for i, res in enumerate(statuses):
                 history.append(res)
                 progress_bar.progress((i + 1) / total)
 
-                # Affichage du workflow
                 html_steps = ""
                 for j, h in enumerate(history):
                     icon, desc = CHORUS_STATUS.get(h.status, ("❓", h.status))
                     is_current = j == len(history) - 1
                     style = "border-left: 4px solid #28a745; background: #d4edda;" if is_current else ""
-                    html_steps += f"""
-<div class="chorus-step" style="{style}">
-    {icon} <strong>{h.status}</strong> — {desc}
-</div>"""
+                    html_steps += f'<div class="chorus-step" style="{style}">{icon} <strong>{h.status}</strong> — {desc}</div>'
 
                 status_placeholder.markdown(html_steps, unsafe_allow_html=True)
 
