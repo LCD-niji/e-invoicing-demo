@@ -110,62 +110,76 @@ def build_facturx_from_xml(xml_string: str, profile: str = "EN16931") -> bytes:
         return _embed_xml_pypdf(pdf_bytes, xml_bytes)
     
 def extract_xml_from_facturx(pdf_bytes: bytes) -> tuple[str, str]:
-    """Extrait le XML CII embarqué dans un PDF Factur-X."""
+    """
+    Extrait le XML CII embarqué dans un PDF Factur-X.
+    Supporte : librairie facturx, pypdf 4.x (attachments), pypdf legacy.
+    """
+    from pypdf import PdfReader
 
-    # ── Tentative via librairie facturx ───────────────────
+    # ── Méthode 1 : librairie facturx (si disponible) ─────
     if _facturx_gen:
         try:
             import facturx as _fx
             _extract = getattr(_fx, "get_facturx_xml_from_pdf",
-                       getattr(getattr(_fx, "main", None), "get_facturx_xml_from_pdf", None))
+                       getattr(getattr(_fx, "main", None),
+                               "get_facturx_xml_from_pdf", None))
             if _extract:
                 xml_bytes, profile = _extract(BytesIO(pdf_bytes))
                 return xml_bytes.decode("utf-8"), profile or "EN16931"
         except Exception:
             pass
 
-    # ── Fallback pypdf — chercher toute pièce jointe XML ──
-    from pypdf import PdfReader
-    reader  = PdfReader(BytesIO(pdf_bytes))
-    catalog = reader.trailer["/Root"].get_object()
-
-    # Méthode 1 : /Names > /EmbeddedFiles (standard PDF/A-3)
+    # ── Méthode 2 : pypdf 4.x — reader.attachments ────────
     try:
-        ef_names = catalog["/Names"]["/EmbeddedFiles"]["/Names"]
-        for i in range(0, len(ef_names), 2):
-            name = str(ef_names[i])
-            if name.lower().endswith(".xml") or "factur" in name.lower():
-                fspec    = ef_names[i + 1].get_object()
-                xml_data = fspec["/EF"]["/F"].get_object().get_data()
-                return xml_data.decode("utf-8"), "EN16931"
+        reader = PdfReader(BytesIO(pdf_bytes))
+        if hasattr(reader, "attachments") and reader.attachments:
+            for name, data_list in reader.attachments.items():
+                if name.lower().endswith(".xml") or "factur" in name.lower():
+                    for data in data_list:
+                        xml_str = data.decode("utf-8")
+                        if "CrossIndustryInvoice" in xml_str or "Invoice" in xml_str:
+                            return xml_str, "EN16931"
+            # Si pas de XML au nom explicite, prendre la première pièce jointe XML
+            for name, data_list in reader.attachments.items():
+                for data in data_list:
+                    try:
+                        decoded = data.decode("utf-8")
+                        if decoded.strip().startswith("<?xml") or decoded.strip().startswith("<"):
+                            return decoded, "EN16931"
+                    except Exception:
+                        continue
     except Exception:
         pass
 
-    # Méthode 2 : /AF (Associated Files — Factur-X spec)
+    # ── Méthode 3 : pypdf legacy — /Names > /EmbeddedFiles ─
     try:
-        af = catalog["/AF"]
-        for ref in af:
+        reader  = PdfReader(BytesIO(pdf_bytes))
+        catalog = reader.trailer["/Root"].get_object()
+        ef_tree = catalog["/Names"]["/EmbeddedFiles"]["/Names"]
+        for i in range(0, len(ef_tree), 2):
+            name  = str(ef_tree[i])
+            fspec = ef_tree[i + 1].get_object()
+            data  = fspec["/EF"]["/F"].get_object().get_data()
+            xml_str = data.decode("utf-8")
+            if "Invoice" in xml_str or xml_str.strip().startswith("<?xml"):
+                return xml_str, "EN16931"
+    except Exception:
+        pass
+
+    # ── Méthode 4 : /AF (Associated Files) ────────────────
+    try:
+        reader  = PdfReader(BytesIO(pdf_bytes))
+        catalog = reader.trailer["/Root"].get_object()
+        for ref in catalog["/AF"]:
             fspec = ref.get_object()
             if "/EF" in fspec:
-                xml_data = fspec["/EF"]["/F"].get_object().get_data()
-                return xml_data.decode("utf-8"), "EN16931"
-    except Exception:
-        pass
-
-    # Méthode 3 : chercher dans les annotations de chaque page
-    try:
-        for page in reader.pages:
-            annots = page.get("/Annots", [])
-            for annot in annots:
-                a = annot.get_object()
-                if a.get("/Subtype") == "/FileAttachment":
-                    fspec    = a["/FS"].get_object()
-                    xml_data = fspec["/EF"]["/F"].get_object().get_data()
-                    return xml_data.decode("utf-8"), "EN16931"
+                data = fspec["/EF"]["/F"].get_object().get_data()
+                return data.decode("utf-8"), "EN16931"
     except Exception:
         pass
 
     raise ValueError(
         "Aucun XML Factur-X trouvé dans ce PDF. "
-        "Vérifiez que le fichier est un PDF Factur-X (pas un simple PDF)."
+        "Ce PDF a probablement été créé sans XML embarqué (PDF simple, pas Factur-X). "
+        "Utilisez un PDF généré par cet outil via le bouton 'Générer le Factur-X complet'."
     )
