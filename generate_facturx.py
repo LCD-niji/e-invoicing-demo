@@ -108,3 +108,44 @@ def build_facturx_from_xml(xml_string: str, profile: str = "EN16931") -> bytes:
         )
     else:
         return _embed_xml_pypdf(pdf_bytes, xml_bytes)
+    
+def extract_xml_from_facturx(pdf_bytes: bytes) -> tuple[str, str]:
+    """
+    Extrait le XML CII embarqué dans un PDF Factur-X.
+    Retourne (xml_string, profile_détecté).
+    Lève ValueError si le PDF ne contient pas de XML Factur-X.
+    """
+    # Tentative via librairie facturx
+    if _facturx_gen:
+        try:
+            import facturx as _fx
+            # Selon la version
+            _extract = getattr(_fx, "get_facturx_xml_from_pdf",
+                       getattr(_fx.main, "get_facturx_xml_from_pdf", None))
+            if _extract:
+                xml_bytes, profile = _extract(BytesIO(pdf_bytes))
+                return xml_bytes.decode("utf-8"), profile or "EN16931"
+        except Exception:
+            pass
+
+    # Fallback pypdf — chercher la pièce jointe factur-x.xml
+    from pypdf import PdfReader
+    reader = PdfReader(BytesIO(pdf_bytes))
+    catalog = reader.trailer["/Root"]
+
+    # Chercher dans /Names → /EmbeddedFiles
+    try:
+        names = catalog["/Names"]["/EmbeddedFiles"]["/Names"]
+        for i in range(0, len(names), 2):
+            name = str(names[i])
+            if "factur" in name.lower() or name.endswith(".xml"):
+                filespec = names[i + 1].get_object()
+                xml_bytes = filespec["/EF"]["/F"].get_object().get_data()
+                return xml_bytes.decode("utf-8"), "EN16931"
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Aucun XML Factur-X trouvé dans ce PDF. "
+        "Vérifiez que le fichier est bien un PDF Factur-X (pas un simple PDF)."
+    )

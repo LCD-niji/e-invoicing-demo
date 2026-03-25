@@ -38,7 +38,10 @@ from generate_pdf import render_invoice_pdf
 from generate_facturx import build_facturx, build_facturx_from_xml
 from validate_invoice import InvoiceValidator
 from send_chorus import simulate_submission, simulate_status_progression, CHORUS_STATUS
+from generate_facturx import build_facturx, build_facturx_from_xml, extract_xml_from_facturx
 
+import facturx
+st.caption(f"facturx version : {facturx.__version__} — attrs : {[a for a in dir(facturx) if not a.startswith('_')]}")
 
 # ─────────────────────────────────────────────
 # Configuration Streamlit
@@ -324,6 +327,7 @@ with tab2:
         "Source",
         ["Facture générée ci-dessus",
          "Uploader un fichier XML",
+         "Uploader un Factur-X PDF",
          "Convertir un XML CII en Factur-X PDF"],
         horizontal=True
     )
@@ -365,6 +369,29 @@ with tab2:
                         st.success("✅ Factur-X PDF/A-3b généré")
                     except Exception as e:
                         st.error(f"❌ Erreur conversion : {e}")
+
+        elif xml_source == "Uploader un Factur-X PDF":
+    uploaded_pdf = st.file_uploader(
+        "Choisir un fichier Factur-X (.pdf)",
+        type=["pdf"],
+        key="pdf_upload"
+    )
+    if uploaded_pdf:
+        pdf_bytes = uploaded_pdf.read()
+        try:
+            xml_to_validate, detected_profile = extract_xml_from_facturx(pdf_bytes)
+            st.success(f"✅ XML extrait du PDF — Profil détecté : **{detected_profile}**")
+            with st.expander("📄 Aperçu du XML extrait"):
+                st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
+            st.download_button(
+                label="⬇️ Télécharger le XML extrait",
+                data=xml_to_validate.encode("utf-8"),
+                file_name=uploaded_pdf.name.replace(".pdf", "_extracted.xml"),
+                mime="application/xml",
+            )
+        except ValueError as e:
+            st.error(f"❌ {e}")
+            xml_to_validate = None
 
     # ── Initialisation
     result     = None
