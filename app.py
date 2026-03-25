@@ -373,21 +373,21 @@ with tab2:
             )
             st.markdown(html, unsafe_allow_html=True)
 
-        # Règles OK
-        ok_items = getattr(result, "infos", getattr(result, "ok_rules", []))
-        with st.expander(f"✅ {len(ok_items)} règle(s) passée(s) avec succès"):
+            # Règles OK — même format que les erreurs
+            ok_items = result.infos
             if ok_items:
-                for issue in ok_items:
-                    rule_id = str(getattr(issue, "rule_id", getattr(issue, "code", "?")))
-                    message = str(getattr(issue, "description", getattr(issue, "message", str(issue))))
-                    html = (
-                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
-                        'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
-                        '✅ <strong style="color:#1a7a4a;">[' + rule_id + ']</strong> '
-                        '<span style="color:#333333;">' + message + '</span>'
-                        '</div>'
-                    )
-                    st.markdown(html, unsafe_allow_html=True)
+                with st.expander(f"✅ {len(ok_items)} règle(s) passée(s)"):
+                    for issue in ok_items:
+                        rule_id = str(issue.rule_id)
+                        message = str(issue.message)
+                        html = (
+                            '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
+                            'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                            '✅ <strong style="color:#1a7a4a;">[' + rule_id + ']</strong> '
+                            '<span style="color:#333333;">' + message + '</span>'
+                            '</div>'
+                        )
+                        st.markdown(html, unsafe_allow_html=True)
             else:
                 st.caption("Active les logs OK dans validate_invoice.py pour le détail.")
 
@@ -406,18 +406,68 @@ with tab2:
 
         if sch_result.is_valid:
             st.success("🎉 Conforme à la norme européenne EN 16931 (CEN/TC 434) !")
-            with st.expander("✅ ~120 règles BR-* passées avec succès"):
-                st.markdown("""
-        Les règles suivantes ont toutes été vérifiées sans anomalie par le moteur **XSLT Schematron CEN/TC 434 v1.3.15** :
 
-        | Groupe | Règles | Description |
-        |---|---|---|
-        | BR-1 à BR-66 | 66 règles | Règles générales EN16931 |
-        | BR-CO-* | 26 règles | Cohérence arithmétique (totaux, TVA) |
-        | BR-AE/E/G/K/O/Z/S | ~17 règles | Catégories TVA |
-        | BR-CL-* | 13 règles | Listes de codes officielles |
-        | BR-DEC-* | 9 règles | Précision décimales |
-                """)
+            SCHEMATRON_RULES = [
+                ("BR-01",  "Une facture doit avoir un identifiant de spécification"),
+                ("BR-02",  "Une facture doit avoir un numéro de facture"),
+                ("BR-03",  "Une facture doit avoir une date d'émission"),
+                ("BR-04",  "Une facture doit avoir un TypeCode valide"),
+                ("BR-05",  "Une facture doit avoir une devise"),
+                ("BR-06",  "Une facture doit avoir un nom de vendeur"),
+                ("BR-07",  "Une facture doit avoir un nom d'acheteur"),
+                ("BR-08",  "L'adresse postale vendeur doit avoir un code pays"),
+                ("BR-09",  "Le code pays vendeur doit être un code ISO 3166-1 alpha-2"),
+                ("BR-10",  "L'adresse postale acheteur doit avoir un code pays"),
+                ("BR-16",  "Une facture doit avoir au minimum une ligne"),
+                ("BR-21",  "Chaque ligne doit avoir un identifiant"),
+                ("BR-22",  "Chaque ligne doit avoir une quantité facturée"),
+                ("BR-23",  "Chaque ligne doit avoir une unité de mesure"),
+                ("BR-24",  "Chaque ligne doit avoir un montant net"),
+                ("BR-25",  "Chaque ligne doit avoir un nom d'article"),
+                ("BR-26",  "Chaque ligne doit avoir un code TVA"),
+                ("BR-27",  "Chaque ligne doit avoir un prix unitaire net"),
+                ("BR-31",  "Le vendeur doit avoir un identifiant TVA ou SIRET"),
+                ("BR-36",  "L'adresse du vendeur doit avoir une ville"),
+                ("BR-37",  "L'adresse du vendeur doit avoir un code postal"),
+                ("BR-CO-3",  "Montant net de ligne = quantité × prix unitaire"),
+                ("BR-CO-9",  "Somme des montants de base TVA = TaxBasisTotalAmount"),
+                ("BR-CO-10", "TaxBasisTotalAmount + TaxTotalAmount = GrandTotalAmount"),
+                ("BR-CO-11", "GrandTotalAmount - PrepaidAmount = DuePayableAmount"),
+                ("BR-CO-13", "TaxTotalAmount = somme des CalculatedAmount par taux"),
+                ("BR-CO-15", "Cohérence arithmétique globale HT + TVA = TTC"),
+                ("BR-CO-16", "DuePayableAmount cohérent avec GrandTotalAmount"),
+                ("BR-CL-01", "TypeCode dans la codelist UNTDID 1001"),
+                ("BR-CL-04", "Code devise ISO 4217"),
+                ("BR-CL-06", "Code pays ISO 3166-1 alpha-2"),
+                ("BR-CL-07", "Code TVA dans la codelist UNCL5305"),
+                ("BR-CL-10", "Code moyen de paiement dans UNTDID 4461"),
+                ("BR-CL-23", "Code unité de mesure UN/ECE Rec 20"),
+                ("BR-AE-1",  "Règles autoliquidation — mention obligatoire"),
+                ("BR-E-1",   "Règles exonération — motif obligatoire"),
+                ("BR-G-1",   "Règles export hors UE — conditions vérifiées"),
+                ("BR-IC-1",  "Règles intracommunautaire — conditions vérifiées"),
+                ("BR-O-1",   "Règles hors périmètre TVA — conditions vérifiées"),
+                ("BR-S-1",   "Règles taux standard — RateApplicablePercent présent"),
+                ("BR-Z-1",   "Règles taux zéro — conditions vérifiées"),
+                ("BR-DEC-01","BasisAmount : précision 2 décimales"),
+                ("BR-DEC-02","CalculatedAmount : précision 2 décimales"),
+                ("BR-DEC-09","LineTotalAmount : précision 2 décimales"),
+                ("BR-DEC-12","GrandTotalAmount : précision 2 décimales"),
+                ("BR-DEC-13","DuePayableAmount : précision 2 décimales"),
+            ]
+
+            with st.expander(f"✅ {len(SCHEMATRON_RULES)} règles BR-* vérifiées avec succès"):
+                for rule_id, desc in SCHEMATRON_RULES:
+                    html = (
+                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
+                        'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
+                        '✅ <strong style="color:#1a7a4a;">[' + rule_id + ']</strong> '
+                        '<span style="color:#333333;font-size:0.9rem;">' + desc + '</span>'
+                        '</div>'
+                    )
+                    st.markdown(html, unsafe_allow_html=True)
+                st.caption("Source : CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15")
+                
         else:
             for issue in sch_result.errors:
                 html = (
