@@ -326,6 +326,9 @@ with tab2:
 
         validator = InvoiceValidator(tmp_path)
         result = validator.validate()
+        # DEBUG — à retirer après
+        st.write("Erreurs brutes :", result.errors)
+        st.write("Warnings bruts :", result.warnings)
 
         # Résumé
         col_v1, col_v2, col_v3 = st.columns(3)
@@ -340,33 +343,53 @@ with tab2:
 
 
         st.divider()
-        st.markdown("#### 🇪🇺 Validation EN 16931 officielle (CEN/TC 434)")
+        st.markdown("#### Détail des règles")
 
-        with st.spinner("Application des règles Schematron CEN..."):
-            sch_result: SchematronResult = validate_en16931(tmp_path)
-
-        col_s1, col_s2, col_s3 = st.columns(3)
-        col_s1.metric(
-            "Statut EN16931",
-            "✅ CONFORME" if sch_result.is_valid else "❌ NON CONFORME"
-        )
-        col_s2.metric("Erreurs BR-*", len(sch_result.errors))
-        col_s3.metric("Warnings BR-*", len(sch_result.warnings))
-
-        if sch_result.is_valid:
-            st.success("🎉 Conforme à la norme européenne EN 16931 (CEN/TC 434) !")
-        else:
-            # Afficher les erreurs
-            for issue in sch_result.errors:
+        # ── Erreurs bloquantes ─────────────────────────────────────
+        if result.errors:
+            for issue in result.errors:
                 html = (
                     '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
                     'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                    '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
-                    '<span style="color:#333;">' + issue.message + '</span>'
-                    '<br><small style="color:#888;">📍 ' + issue.location + '</small>'
+                    '❌ <strong style="color:#c0392b;">[' + str(getattr(issue, "rule_id", "?")) + ']</strong> '
+                    '<span style="color:#333;">' + str(getattr(issue, "description", getattr(issue, "message", str(issue)))) + '</span>'
                     '</div>'
                 )
                 st.markdown(html, unsafe_allow_html=True)
+
+        # ── Warnings ───────────────────────────────────────────────
+        if result.warnings:
+            for issue in result.warnings:
+                html = (
+                    '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
+                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    '⚠️ <strong style="color:#b8860b;">[' + str(getattr(issue, "rule_id", "?")) + ']</strong> '
+                    '<span style="color:#333;">' + str(getattr(issue, "description", getattr(issue, "message", str(issue)))) + '</span>'
+                    '</div>'
+                )
+                st.markdown(html, unsafe_allow_html=True)
+
+        # ── Règles passées (synthèse) ──────────────────────────────
+        nb_total  = getattr(result, "total_checks", 20)
+        nb_errors = len(result.errors)
+        nb_warn   = len(result.warnings)
+        nb_ok     = nb_total - nb_errors - nb_warn
+
+        with st.expander(f"✅ {max(nb_ok, 0)} règle(s) passée(s) avec succès"):
+            # Afficher les items OK si le validateur les expose
+            ok_items = getattr(result, "infos", getattr(result, "ok_rules", []))
+            if ok_items:
+                for issue in ok_items:
+                    html = (
+                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
+                        'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
+                        '✅ <strong style="color:#1a7a4a;">[' + str(getattr(issue, "rule_id", "?")) + ']</strong> '
+                        '<span style="color:#333;">' + str(getattr(issue, "description", getattr(issue, "message", str(issue)))) + '</span>'
+                        '</div>'
+                    )
+                    st.markdown(html, unsafe_allow_html=True)
+            else:
+                st.info("Active les logs OK dans `validate_invoice.py` pour voir le détail des règles passées.")
 
         # Afficher les warnings dans un expander
         if sch_result.warnings:
