@@ -370,28 +370,28 @@ with tab2:
                     except Exception as e:
                         st.error(f"❌ Erreur conversion : {e}")
 
-        elif xml_source == "Uploader un Factur-X PDF":
-    uploaded_pdf = st.file_uploader(
-        "Choisir un fichier Factur-X (.pdf)",
-        type=["pdf"],
-        key="pdf_upload"
-    )
-    if uploaded_pdf:
-        pdf_bytes = uploaded_pdf.read()
-        try:
-            xml_to_validate, detected_profile = extract_xml_from_facturx(pdf_bytes)
-            st.success(f"✅ XML extrait du PDF — Profil détecté : **{detected_profile}**")
-            with st.expander("📄 Aperçu du XML extrait"):
-                st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
-            st.download_button(
-                label="⬇️ Télécharger le XML extrait",
-                data=xml_to_validate.encode("utf-8"),
-                file_name=uploaded_pdf.name.replace(".pdf", "_extracted.xml"),
-                mime="application/xml",
-            )
-        except ValueError as e:
-            st.error(f"❌ {e}")
-            xml_to_validate = None
+    elif xml_source == "Uploader un Factur-X PDF":
+        uploaded_pdf = st.file_uploader(
+            "Choisir un fichier Factur-X (.pdf)",
+            type=["pdf"],
+            key="pdf_upload"
+        )
+        if uploaded_pdf:
+            pdf_bytes = uploaded_pdf.read()
+            try:
+                xml_to_validate, detected_profile = extract_xml_from_facturx(pdf_bytes)
+                st.success(f"✅ XML extrait du PDF — Profil détecté : **{detected_profile}**")
+                with st.expander("📄 Aperçu du XML extrait"):
+                    st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
+                st.download_button(
+                    label="⬇️ Télécharger le XML extrait",
+                    data=xml_to_validate.encode("utf-8"),
+                    file_name=uploaded_pdf.name.replace(".pdf", "_extracted.xml"),
+                    mime="application/xml",
+                )
+            except ValueError as e:
+                st.error(f"❌ {e}")
+                xml_to_validate = None
 
     # ── Initialisation
     result     = None
