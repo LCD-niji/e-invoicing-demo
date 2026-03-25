@@ -1,5 +1,5 @@
 """
-dashboard/app.py
+app.py
 -----------------
 Dashboard Streamlit — Démo facturation électronique 2026
 Auteur : [Votre nom] — https://linkedin.com/in/[votre-profil]

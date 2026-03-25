@@ -130,6 +130,7 @@ class InvoiceValidator:
         self.xml_path = xml_path
         self.issues: list[ValidationIssue] = []
         self.root: Optional[ET.Element] = None
+        self.type_code: Optional[str] = None
 
     def _add(self, rule_id: str, severity: str, message: str,
              path: str = None, suggestion: str = None):
@@ -200,6 +201,7 @@ class InvoiceValidator:
         elif type_code not in VALID_CODES:
             self._error("BR-04V", f"TypeCode invalide : {type_code}. Valeurs valides : {list(VALID_CODES.keys())}")
         else:
+            self.type_code = type_code
             self._info("BR-04", f"Type document : {VALID_CODES[type_code]} ({type_code})")
 
     # ── BR-05 : Date d'émission ──────────────────
@@ -394,6 +396,29 @@ class InvoiceValidator:
                     suggestion="14 chiffres exactement (SIREN 9 + NIC 5)")
         else:
             self._info("FR-02", f"SIRET acheteur : {siret}")
+    
+    def _check_credit_note_reference(self):
+        """BR-55 : un avoir/rectificative doit référencer la facture d'origine."""
+        if self.type_code not in ("381", "384"):
+            return
+
+        txn = _find(self.root, "rsm:SupplyChainTradeTransaction")
+        agr = _find(txn, "ram:ApplicableHeaderTradeAgreement") if txn else None
+        if agr is None:
+            return
+
+        ref = _text(agr, "ram:InvoiceReferencedDocument/ram:IssuerAssignedID")
+        label = "Avoir" if self.type_code == "381" else "Facture rectificative"
+
+        if not ref:
+            self._error(
+                "BR-55",
+                f"{label} sans référence à la facture d'origine",
+                suggestion="Renseignez InvoiceReferencedDocument/IssuerAssignedID avec le numéro de la facture initiale"
+            )
+        else:
+            self._info("BR-55", f"Référence facture d'origine : {ref}")
+
     # ── Orchestration ─────────────────────────────
     def validate(self) -> ValidationResult:
         if not self._parse():
@@ -406,6 +431,7 @@ class InvoiceValidator:
         self._check_seller()
         self._check_buyer()
         self._check_buyer_siret()
+        self._check_credit_note_reference()
         self._check_lines()
         self._check_totals()
 
