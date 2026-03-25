@@ -59,19 +59,21 @@ cd dashboard && streamlit run app.py
 
 ## 📦 Structure du projet
 
-```
 e-invoicing-demo/
-├── generate_invoice.py    # Générateur XML Factur-X (CII)
-├── validate_invoice.py    # Validateur règles EN 16931 + FR
-├── send_chorus.py         # Connecteur API Chorus Pro (PISTE)
-├── dashboard/
-│   └── app.py             # Interface Streamlit
+├── app.py                    # Interface Streamlit (démo interactive)
+├── generate_invoice.py       # Générateur XML Factur-X (CII)
+├── validate_invoice.py       # Validateur règles EN 16931 + FR
+├── schematron_validator.py   # Validation Schematron CEN/TC 434 (EN16931)
+├── send_chorus.py            # Connecteur API Chorus Pro (PISTE)
+├── schematron/
+│   └── EN16931-CII-validation.xslt   # Règles officielles CEN v1.3.15
+├── rules_engine/
+│   └── rules.json            # Référentiel Annexe 7 DGFiP v1.8 (235 règles)
 ├── tests/
-│   └── test_invoice.py    # Tests unitaires (pytest)
-├── sample_data/           # Exemples de fichiers XML
+│   └── test_invoice.py       # Tests unitaires (pytest)
 ├── requirements.txt
-└── .env.example           # Template credentials PISTE
-```
+└── .env.example              # Template credentials PISTE
+
 
 ---
 

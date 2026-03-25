@@ -377,14 +377,23 @@ class InvoiceValidator:
             return
 
         buyer_org = _find(agr, "ram:BuyerTradeParty/ram:SpecifiedLegalOrganization")
-        if buyer_org is not None:
-            siret_el = buyer_org.find(f"{{{NS['ram']}}}ID")
-            if siret_el is not None and siret_el.text:
-                siret = siret_el.text.strip()
-                if not re.match(r"^\d{14}$", siret):
-                    self._warn("FR-02", f"SIRET acheteur suspect : '{siret}'",
-                               suggestion="Vérifiez que le SIRET comporte exactement 14 chiffres")
 
+        if buyer_org is None:
+            self._warn("FR-02", "SIRET acheteur absent",
+                    suggestion="Obligatoire B2G (Chorus Pro), recommandé B2B dès 2026")
+            return
+
+        siret_el = buyer_org.find(f"{{{NS['ram']}}}ID")
+        siret    = (siret_el.text or "").strip() if siret_el is not None else ""
+
+        if not siret:
+            self._warn("FR-02", "SIRET acheteur vide",
+                    suggestion="Tag présent sans valeur — renseignez un SIRET valide (14 chiffres)")
+        elif not re.match(r"^\d{14}$", siret):
+            self._warn("FR-02", f"SIRET acheteur suspect : '{siret}'",
+                    suggestion="14 chiffres exactement (SIREN 9 + NIC 5)")
+        else:
+            self._info("FR-02", f"SIRET acheteur : {siret}")
     # ── Orchestration ─────────────────────────────
     def validate(self) -> ValidationResult:
         if not self._parse():
