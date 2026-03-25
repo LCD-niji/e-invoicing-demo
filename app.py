@@ -290,7 +290,6 @@ with tab1:
 
         except Exception as e:
             st.error(f"❌ Erreur lors de la génération : {e}")
-
 # ═══════════════════════════════════════════
 # TAB 2 — Validation
 # ═══════════════════════════════════════════
@@ -318,9 +317,10 @@ with tab2:
             except UnicodeDecodeError:
                 xml_to_validate = content.decode("latin-1")
 
-    # ── Initialisation — obligatoire en Streamlit ──────────────
+    # Initialisation obligatoire Streamlit
     result     = None
     sch_result = None
+    ai_result  = None
 
     if xml_to_validate and st.button("🔍 Valider la facture", type="primary", use_container_width=True):
 
@@ -328,7 +328,7 @@ with tab2:
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(xml_to_validate)
 
-        # ── Validation DGFiP ───────────────────────────────────
+        # ── 1. Validation DGFiP (validate_invoice.py) ─────────
         validator = InvoiceValidator(tmp_path)
         result    = validator.validate()
 
@@ -348,51 +348,41 @@ with tab2:
         st.divider()
         st.markdown("#### Détail des règles DGFiP")
 
-        # Erreurs bloquantes
         for issue in result.errors:
-            rule_id = str(getattr(issue, "rule_id", getattr(issue, "code", "?")))
-            message = str(getattr(issue, "description", getattr(issue, "message", str(issue))))
             html = (
                 '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
                 'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                '❌ <strong style="color:#c0392b;">[' + rule_id + ']</strong> '
-                '<span style="color:#333333;">' + message + '</span>'
+                '❌ <strong style="color:#c0392b;">[' + str(issue.rule_id) + ']</strong> '
+                '<span style="color:#333333;">' + str(issue.message) + '</span>'
                 '</div>'
             )
             st.markdown(html, unsafe_allow_html=True)
 
-        # Warnings
         for issue in result.warnings:
-            rule_id = str(getattr(issue, "rule_id", getattr(issue, "code", "?")))
-            message = str(getattr(issue, "description", getattr(issue, "message", str(issue))))
             html = (
                 '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
                 'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                '⚠️ <strong style="color:#b8860b;">[' + rule_id + ']</strong> '
-                '<span style="color:#333333;">' + message + '</span>'
+                '⚠️ <strong style="color:#b8860b;">[' + str(issue.rule_id) + ']</strong> '
+                '<span style="color:#333333;">' + str(issue.message) + '</span>'
                 '</div>'
             )
             st.markdown(html, unsafe_allow_html=True)
 
-            # Règles OK — même format que les erreurs
-            ok_items = result.infos
-            if ok_items:
-                with st.expander(f"✅ {len(ok_items)} règle(s) passée(s)"):
-                    for issue in ok_items:
-                        rule_id = str(issue.rule_id)
-                        message = str(issue.message)
-                        html = (
-                            '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
-                            'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                            '✅ <strong style="color:#1a7a4a;">[' + rule_id + ']</strong> '
-                            '<span style="color:#333333;">' + message + '</span>'
-                            '</div>'
-                        )
-                        st.markdown(html, unsafe_allow_html=True)
-            else:
-                st.caption("Active les logs OK dans validate_invoice.py pour le détail.")
+        # ← ICI : hors de toute boucle
+        ok_items = result.infos
+        if ok_items:
+            with st.expander(f"✅ {len(ok_items)} règle(s) DGFiP passée(s)"):
+                for issue in ok_items:
+                    html = (
+                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
+                        'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                        '✅ <strong style="color:#1a7a4a;">[' + str(issue.rule_id) + ']</strong> '
+                        '<span style="color:#333333;">' + str(issue.message) + '</span>'
+                        '</div>'
+                    )
+                    st.markdown(html, unsafe_allow_html=True)
 
-        # ── Validation EN16931 Schematron CEN ──────────────────
+        # ── 2. Validation EN16931 Schematron CEN ───────────────
         st.divider()
         st.markdown("#### 🇪🇺 Validation EN 16931 officielle (CEN/TC 434)")
 
@@ -407,56 +397,54 @@ with tab2:
 
         if sch_result.is_valid:
             st.success("🎉 Conforme à la norme européenne EN 16931 (CEN/TC 434) !")
-
             SCHEMATRON_RULES = [
-                ("BR-01",  "Une facture doit avoir un identifiant de spécification"),
-                ("BR-02",  "Une facture doit avoir un numéro de facture"),
-                ("BR-03",  "Une facture doit avoir une date d'émission"),
-                ("BR-04",  "Une facture doit avoir un TypeCode valide"),
-                ("BR-05",  "Une facture doit avoir une devise"),
-                ("BR-06",  "Une facture doit avoir un nom de vendeur"),
-                ("BR-07",  "Une facture doit avoir un nom d'acheteur"),
-                ("BR-08",  "L'adresse postale vendeur doit avoir un code pays"),
-                ("BR-09",  "Le code pays vendeur doit être un code ISO 3166-1 alpha-2"),
-                ("BR-10",  "L'adresse postale acheteur doit avoir un code pays"),
-                ("BR-16",  "Une facture doit avoir au minimum une ligne"),
-                ("BR-21",  "Chaque ligne doit avoir un identifiant"),
-                ("BR-22",  "Chaque ligne doit avoir une quantité facturée"),
-                ("BR-23",  "Chaque ligne doit avoir une unité de mesure"),
-                ("BR-24",  "Chaque ligne doit avoir un montant net"),
-                ("BR-25",  "Chaque ligne doit avoir un nom d'article"),
-                ("BR-26",  "Chaque ligne doit avoir un code TVA"),
-                ("BR-27",  "Chaque ligne doit avoir un prix unitaire net"),
-                ("BR-31",  "Le vendeur doit avoir un identifiant TVA ou SIRET"),
-                ("BR-36",  "L'adresse du vendeur doit avoir une ville"),
-                ("BR-37",  "L'adresse du vendeur doit avoir un code postal"),
-                ("BR-CO-3",  "Montant net de ligne = quantité × prix unitaire"),
-                ("BR-CO-9",  "Somme des montants de base TVA = TaxBasisTotalAmount"),
-                ("BR-CO-10", "TaxBasisTotalAmount + TaxTotalAmount = GrandTotalAmount"),
-                ("BR-CO-11", "GrandTotalAmount - PrepaidAmount = DuePayableAmount"),
-                ("BR-CO-13", "TaxTotalAmount = somme des CalculatedAmount par taux"),
-                ("BR-CO-15", "Cohérence arithmétique globale HT + TVA = TTC"),
-                ("BR-CO-16", "DuePayableAmount cohérent avec GrandTotalAmount"),
-                ("BR-CL-01", "TypeCode dans la codelist UNTDID 1001"),
-                ("BR-CL-04", "Code devise ISO 4217"),
-                ("BR-CL-06", "Code pays ISO 3166-1 alpha-2"),
-                ("BR-CL-07", "Code TVA dans la codelist UNCL5305"),
-                ("BR-CL-10", "Code moyen de paiement dans UNTDID 4461"),
-                ("BR-CL-23", "Code unité de mesure UN/ECE Rec 20"),
-                ("BR-AE-1",  "Règles autoliquidation — mention obligatoire"),
-                ("BR-E-1",   "Règles exonération — motif obligatoire"),
-                ("BR-G-1",   "Règles export hors UE — conditions vérifiées"),
-                ("BR-IC-1",  "Règles intracommunautaire — conditions vérifiées"),
-                ("BR-O-1",   "Règles hors périmètre TVA — conditions vérifiées"),
-                ("BR-S-1",   "Règles taux standard — RateApplicablePercent présent"),
-                ("BR-Z-1",   "Règles taux zéro — conditions vérifiées"),
+                ("BR-01","Une facture doit avoir un identifiant de spécification"),
+                ("BR-02","Une facture doit avoir un numéro de facture"),
+                ("BR-03","Une facture doit avoir une date d'émission"),
+                ("BR-04","Une facture doit avoir un TypeCode valide"),
+                ("BR-05","Une facture doit avoir une devise"),
+                ("BR-06","Une facture doit avoir un nom de vendeur"),
+                ("BR-07","Une facture doit avoir un nom d'acheteur"),
+                ("BR-08","L'adresse postale vendeur doit avoir un code pays"),
+                ("BR-09","Le code pays vendeur doit être un code ISO 3166-1 alpha-2"),
+                ("BR-10","L'adresse postale acheteur doit avoir un code pays"),
+                ("BR-16","Une facture doit avoir au minimum une ligne"),
+                ("BR-21","Chaque ligne doit avoir un identifiant"),
+                ("BR-22","Chaque ligne doit avoir une quantité facturée"),
+                ("BR-23","Chaque ligne doit avoir une unité de mesure"),
+                ("BR-24","Chaque ligne doit avoir un montant net"),
+                ("BR-25","Chaque ligne doit avoir un nom d'article"),
+                ("BR-26","Chaque ligne doit avoir un code TVA"),
+                ("BR-27","Chaque ligne doit avoir un prix unitaire net"),
+                ("BR-31","Le vendeur doit avoir un identifiant TVA ou SIRET"),
+                ("BR-36","L'adresse du vendeur doit avoir une ville"),
+                ("BR-37","L'adresse du vendeur doit avoir un code postal"),
+                ("BR-CO-3","Montant net de ligne = quantité × prix unitaire"),
+                ("BR-CO-9","Somme des montants de base TVA = TaxBasisTotalAmount"),
+                ("BR-CO-10","TaxBasisTotalAmount + TaxTotalAmount = GrandTotalAmount"),
+                ("BR-CO-11","GrandTotalAmount - PrepaidAmount = DuePayableAmount"),
+                ("BR-CO-13","TaxTotalAmount = somme des CalculatedAmount par taux"),
+                ("BR-CO-15","Cohérence arithmétique globale HT + TVA = TTC"),
+                ("BR-CO-16","DuePayableAmount cohérent avec GrandTotalAmount"),
+                ("BR-CL-01","TypeCode dans la codelist UNTDID 1001"),
+                ("BR-CL-04","Code devise ISO 4217"),
+                ("BR-CL-06","Code pays ISO 3166-1 alpha-2"),
+                ("BR-CL-07","Code TVA dans la codelist UNCL5305"),
+                ("BR-CL-10","Code moyen de paiement dans UNTDID 4461"),
+                ("BR-CL-23","Code unité de mesure UN/ECE Rec 20"),
+                ("BR-AE-1","Règles autoliquidation — mention obligatoire"),
+                ("BR-E-1","Règles exonération — motif obligatoire"),
+                ("BR-G-1","Règles export hors UE — conditions vérifiées"),
+                ("BR-IC-1","Règles intracommunautaire — conditions vérifiées"),
+                ("BR-O-1","Règles hors périmètre TVA — conditions vérifiées"),
+                ("BR-S-1","Règles taux standard — RateApplicablePercent présent"),
+                ("BR-Z-1","Règles taux zéro — conditions vérifiées"),
                 ("BR-DEC-01","BasisAmount : précision 2 décimales"),
                 ("BR-DEC-02","CalculatedAmount : précision 2 décimales"),
                 ("BR-DEC-09","LineTotalAmount : précision 2 décimales"),
                 ("BR-DEC-12","GrandTotalAmount : précision 2 décimales"),
                 ("BR-DEC-13","DuePayableAmount : précision 2 décimales"),
             ]
-
             with st.expander(f"✅ {len(SCHEMATRON_RULES)} règles BR-* vérifiées avec succès"):
                 for rule_id, desc in SCHEMATRON_RULES:
                     html = (
@@ -468,7 +456,6 @@ with tab2:
                     )
                     st.markdown(html, unsafe_allow_html=True)
                 st.caption("Source : CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15")
-                
         else:
             for issue in sch_result.errors:
                 html = (
@@ -481,7 +468,7 @@ with tab2:
                 )
                 st.markdown(html, unsafe_allow_html=True)
 
-        if sch_result.warnings:
+        if sch_result and sch_result.warnings:
             with st.expander(f"⚠️ {len(sch_result.warnings)} avertissement(s) EN16931"):
                 for issue in sch_result.warnings:
                     html = (
@@ -495,77 +482,70 @@ with tab2:
 
         st.markdown("""
 <div style="text-align:right;font-size:0.75rem;color:#888;margin-top:4px;">
-    Source :
-    <a href="https://github.com/ConnectingEurope/eInvoicing-EN16931" target="_blank">
-        CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15
-    </a>
-</div>
-""", unsafe_allow_html=True)
-        
-# ── Validation Annexe 7 DGFiP (rules.json) ────────────────
-st.divider()
-st.markdown("#### 📋 Annexe 7 DGFiP — 235 règles officielles v1.8")
+    Source : <a href="https://github.com/ConnectingEurope/eInvoicing-EN16931" target="_blank">
+    CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15</a>
+</div>""", unsafe_allow_html=True)
 
-rules_path = Path("rules_engine/rules.json")
-if not rules_path.exists():
-    st.warning("⚠️ rules_engine/rules.json introuvable")
-else:
-    with st.spinner("Évaluation des règles Annexe 7 DGFiP..."):
-        ai_val    = AiValidator(rules_path)
-        ai_result = ai_val.validate(tmp_path)
+        # ── 3. Validation Annexe 7 DGFiP (rules.json) ─────────
+        st.divider()
+        st.markdown("#### 📋 Annexe 7 DGFiP — 235 règles officielles v1.8")
 
-    nb_tested  = len(ai_result.errors) + len(ai_result.warnings) + len(ai_result.infos)
-    nb_skipped = len(ai_result.skipped)
+        rules_path = Path("rules_engine/rules.json")
+        if not rules_path.exists():
+            st.warning("⚠️ rules_engine/rules.json introuvable")
+        else:
+            with st.spinner("Évaluation des règles Annexe 7 DGFiP..."):
+                ai_val    = AiValidator(rules_path)
+                ai_result = ai_val.validate(tmp_path)
 
-    col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns(5)
-    col_a1.metric("Statut Annexe 7", "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
-    col_a2.metric("Règles testées",  nb_tested)
-    col_a3.metric("Erreurs",         len(ai_result.errors))
-    col_a4.metric("Warnings",        len(ai_result.warnings))
-    col_a5.metric("Non testables",   nb_skipped)
+            nb_tested  = len(ai_result.errors) + len(ai_result.warnings) + len(ai_result.infos)
+            nb_skipped = len(ai_result.skipped)
 
-    # Erreurs
-    for issue in ai_result.errors:
-        html = (
-            '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
-            'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-            '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
-            '<span style="color:#333333;">' + issue.message + '</span>'
-            '<br><small style="color:#888;">BT : ' + issue.bt + ' · ' + issue.source + '</small>'
-            '</div>'
-        )
-        st.markdown(html, unsafe_allow_html=True)
+            col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns(5)
+            col_a1.metric("Statut Annexe 7", "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
+            col_a2.metric("Règles testées",  nb_tested)
+            col_a3.metric("Erreurs",         len(ai_result.errors))
+            col_a4.metric("Warnings",        len(ai_result.warnings))
+            col_a5.metric("Non testables",   nb_skipped)
 
-    # Warnings
-    for issue in ai_result.warnings:
-        html = (
-            '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
-            'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-            '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
-            '<span style="color:#333333;">' + issue.message + '</span>'
-            '</div>'
-        )
-        st.markdown(html, unsafe_allow_html=True)
+            for issue in ai_result.errors:
+                html = (
+                    '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
+                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
+                    '<span style="color:#333333;">' + issue.message + '</span>'
+                    '<br><small style="color:#888;">BT : ' + issue.bt + ' · ' + issue.source + '</small>'
+                    '</div>'
+                )
+                st.markdown(html, unsafe_allow_html=True)
 
-    # Règles OK
-    with st.expander(f"✅ {len(ai_result.infos)} règles Annexe 7 passées"):
-        for issue in ai_result.infos:
-            html = (
-                '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
-                'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
-                '✅ <strong style="color:#1a7a4a;">[' + issue.rule_id + ']</strong> '
-                '<span style="color:#333333;font-size:0.9rem;">' + issue.message + '</span>'
-                '</div>'
-            )
-            st.markdown(html, unsafe_allow_html=True)
+            for issue in ai_result.warnings:
+                html = (
+                    '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
+                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
+                    '<span style="color:#333333;">' + issue.message + '</span>'
+                    '</div>'
+                )
+                st.markdown(html, unsafe_allow_html=True)
 
-    # Règles skippées (dans expander discret)
-    with st.expander(f"⏭️ {nb_skipped} règles non testables localement"):
-        st.caption("Ces règles nécessitent le PPF/annuaire ou sont couvertes par le Schematron CEN.")
-        for issue in ai_result.skipped:
-            st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
+            with st.expander(f"✅ {len(ai_result.infos)} règles Annexe 7 passées"):
+                for issue in ai_result.infos:
+                    html = (
+                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
+                        'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
+                        '✅ <strong style="color:#1a7a4a;">[' + issue.rule_id + ']</strong> '
+                        '<span style="color:#333333;font-size:0.9rem;">' + issue.message + '</span>'
+                        '</div>'
+                    )
+                    st.markdown(html, unsafe_allow_html=True)
 
-    st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
+            with st.expander(f"⏭️ {nb_skipped} règles non testables localement"):
+                st.caption("Ces règles nécessitent le PPF/annuaire ou sont couvertes par le Schematron CEN.")
+                for issue in ai_result.skipped:
+                    st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
+
+            st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
