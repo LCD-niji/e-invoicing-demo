@@ -315,7 +315,6 @@ with tab1:
                 except Exception as e:
                     st.error(f"❌ Erreur PDF/A-3 : {e}")
 
-
 # ═══════════════════════════════════════════
 # TAB 2 — Validation
 # ═══════════════════════════════════════════
@@ -327,8 +326,7 @@ with tab2:
         "Source",
         ["Facture générée ci-dessus",
          "Uploader un fichier XML",
-         "Uploader un Factur-X PDF",
-         "Convertir un XML CII en Factur-X PDF"],
+         "Uploader un Factur-X PDF"],
         horizontal=True
     )
 
@@ -350,27 +348,8 @@ with tab2:
             except UnicodeDecodeError:
                 xml_to_validate = content.decode("latin-1")
 
-    elif xml_source == "Convertir un XML CII en Factur-X PDF":
-        st.info("Uploadez un XML CII conforme EN 16931 pour obtenir un Factur-X PDF/A-3b.")
-        uploaded_xml = st.file_uploader("Fichier XML CII", type=["xml"], key="xml_convert")
-        if uploaded_xml:
-            xml_str = uploaded_xml.read().decode("utf-8-sig", errors="replace")
-            profile_conv = st.selectbox("Profil", list(PROFILES.keys()), index=3, key="conv_profile")
-            if st.button("🔄 Convertir en Factur-X", type="primary"):
-                with st.spinner("Conversion en cours..."):
-                    try:
-                        fx_bytes = build_facturx_from_xml(xml_str, profile_conv)
-                        st.download_button(
-                            label="⬇️ Télécharger le Factur-X (.pdf)",
-                            data=fx_bytes,
-                            file_name=uploaded_xml.name.replace(".xml", "_facturx.pdf"),
-                            mime="application/pdf",
-                        )
-                        st.success("✅ Factur-X PDF/A-3b généré")
-                    except Exception as e:
-                        st.error(f"❌ Erreur conversion : {e}")
-
     elif xml_source == "Uploader un Factur-X PDF":
+        st.info("Uploadez un PDF généré par cet outil (bouton 'Générer le Factur-X complet' dans l'onglet 1).")
         uploaded_pdf = st.file_uploader(
             "Choisir un fichier Factur-X (.pdf)", type=["pdf"], key="pdf_upload"
         )
@@ -378,26 +357,36 @@ with tab2:
             pdf_bytes = uploaded_pdf.read()
             try:
                 xml_to_validate, detected_profile = extract_xml_from_facturx(pdf_bytes)
-                st.success(f"✅ XML extrait — {len(xml_to_validate)} caractères — Profil : {detected_profile}")
-                # DEBUG — à supprimer après vérification
-                st.code(xml_to_validate[:500], language="xml")                
-                #st.success(f"✅ XML extrait — Profil : **{detected_profile}**")
-                #with st.expander("📄 Aperçu du XML extrait (50 premières lignes)"):
-                #    st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
-                st.download_button(
-                    label="⬇️ Télécharger le XML extrait",
-                    data=xml_to_validate.encode("utf-8"),
-                    file_name=uploaded_pdf.name.replace(".pdf", "_extracted.xml"),
-                    mime="application/xml",
-                )
-                # xml_to_validate est maintenant défini → le bouton Valider s'affichera
+                if "<facture>" in xml_to_validate or "CrossIndustryInvoice" not in xml_to_validate:
+                    st.error(
+                        "❌ Le XML embarqué dans ce PDF est au **format propriétaire** "
+                        "(pas au format CII Factur-X). Ce PDF vient d'un système legacy "
+                        "et n'est pas conforme à la réforme 2026."
+                    )
+                    xml_to_validate = None
+                else:
+                    st.success(f"✅ XML CII extrait du PDF — Profil : **{detected_profile}**")
+                    with st.expander("📄 Aperçu du XML extrait (50 premières lignes)"):
+                        st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
+                    st.download_button(
+                        label="⬇️ Télécharger le XML extrait",
+                        data=xml_to_validate.encode("utf-8"),
+                        file_name=uploaded_pdf.name.replace(".pdf", "_extracted.xml"),
+                        mime="application/xml",
+                    )
             except ValueError as e:
                 st.error(f"❌ {e}")
-                st.info("💡 Ce PDF a peut-être été créé sans XML embarqué (impression simple). "
-                        "Utilisez un PDF généré par cet outil ou un Factur-X certifié.")
-                xml_to_validate = None   # ← bloque le bouton Valider
+                xml_to_validate = None
 
-    # ── Initialisation
+    # Feedback format avant validation
+    if xml_to_validate:
+        if "CrossIndustryInvoice" not in xml_to_validate:
+            st.warning(
+                "⚠️ Le contenu chargé n'est pas un XML CII Factur-X — "
+                "la validation va échouer structurellement."
+            )
+
+    # Initialisation
     result     = None
     sch_result = None
     ai_result  = None
@@ -408,7 +397,19 @@ with tab2:
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(xml_to_validate)
 
-        # ── 1. Validation DGFiP ────────────────────────────
+        # ══════════════════════════════════════════════════
+        # CONTRÔLE 1 — Conformité structurelle DGFiP
+        # ══════════════════════════════════════════════════
+        st.divider()
+        st.markdown("#### 🏛️ Contrôle 1 — Conformité structurelle DGFiP")
+        st.caption(
+            "La DGFiP impose un format CII (Cross Industry Invoice) précis pour la réforme 2026. "
+            "Ces contrôles vérifient que le document respecte la structure minimale : "
+            "élément racine, profil Factur-X, numéro, date, TypeCode. "
+            "Un document qui échoue ici sera rejeté immédiatement par toute plateforme "
+            "de dématérialisation (PDP/PPF)."
+        )
+
         validator = InvoiceValidator(tmp_path)
         result    = validator.validate()
 
@@ -421,12 +422,9 @@ with tab2:
         col_v4.metric("Warnings", len(result.warnings))
 
         if result.is_valid:
-            st.success("🎉 La facture est conforme aux règles DGFiP !")
+            st.success("🎉 Structure conforme aux exigences DGFiP !")
         else:
             st.error(f"La facture comporte {len(result.errors)} erreur(s) bloquante(s)")
-
-        st.divider()
-        st.markdown("#### Détail des règles DGFiP")
 
         for issue in result.errors:
             html = (
@@ -461,9 +459,18 @@ with tab2:
                     )
                     st.markdown(html, unsafe_allow_html=True)
 
-        # ── 2. Validation Schematron CEN ───────────────────
+        # ══════════════════════════════════════════════════
+        # CONTRÔLE 2 — Norme européenne EN 16931
+        # ══════════════════════════════════════════════════
         st.divider()
-        st.markdown("#### 🇪🇺 Validation EN 16931 officielle (CEN/TC 434)")
+        st.markdown("#### 🇪🇺 Contrôle 2 — Norme européenne EN 16931 (CEN/TC 434)")
+        st.caption(
+            "La France a adopté la norme européenne EN 16931 comme socle commun de la facturation "
+            "électronique. Ce contrôle applique les ~120 règles BR-* officielles du CEN "
+            "(Comité Européen de Normalisation) : cohérence arithmétique, codelists ISO, "
+            "règles TVA par catégorie. Un document conforme EN 16931 est interopérable "
+            "dans toute l'Union Européenne."
+        )
 
         with st.spinner("Application des règles Schematron CEN v1.3.15..."):
             sch_result = validate_en16931(tmp_path)
@@ -565,9 +572,18 @@ with tab2:
     CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15</a>
 </div>""", unsafe_allow_html=True)
 
-        # ── 3. Validation Annexe 7 DGFiP ──────────────────
+        # ══════════════════════════════════════════════════
+        # CONTRÔLE 3 — Annexe 7 DGFiP
+        # ══════════════════════════════════════════════════
         st.divider()
-        st.markdown("#### 📋 Annexe 7 DGFiP — 235 règles officielles v1.8")
+        st.markdown("#### 📋 Contrôle 3 — Règles de gestion DGFiP (Annexe 7 v1.8)")
+        st.caption(
+            "En plus de la norme européenne, la DGFiP a publié 235 règles de gestion spécifiques "
+            "à la France (Annexe 7, mise à jour octobre 2025). Elles couvrent les particularités "
+            "fiscales françaises : SIRET obligatoire, régimes de TVA FR, mentions légales, "
+            "avoirs et rectificatives. Ces règles s'appliquent uniquement aux factures émises "
+            "ou reçues par des assujettis français."
+        )
 
         rules_path = Path("rules_engine/rules.json")
         if not rules_path.exists():
@@ -620,12 +636,14 @@ with tab2:
                     st.markdown(html, unsafe_allow_html=True)
 
             with st.expander(f"⏭️ {nb_skipped} règles non testables localement"):
-                st.caption("Ces règles nécessitent le PPF/annuaire ou sont couvertes par le Schematron CEN.")
+                st.caption(
+                    "Ces règles nécessitent un accès au PPF/annuaire DGFiP "
+                    "ou sont déjà couvertes par le Schematron CEN (Contrôle 2)."
+                )
                 for issue in ai_result.skipped:
                     st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
 
             st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
-
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
