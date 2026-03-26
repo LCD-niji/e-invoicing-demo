@@ -209,7 +209,7 @@ class AiValidator:
         except Exception:
             return None
 
-    def validate(self, xml_path: str) -> AiResult:
+    def validate(self, xml_path: str, schematron_ran: bool = False) -> AiResult:
         result = AiResult()
         try:
             tree = etree.parse(xml_path)
@@ -217,26 +217,26 @@ class AiValidator:
             result.issues.append(AiIssue("PARSE-ERR", f"XML invalide : {e}", "ERROR"))
             return result
 
-        # ── Contexte global de la facture ──────────────────
         type_code = self._get_value(tree, BT_XPATH.get("BT-3",  "")) or ""
         vat_code  = self._get_value(tree, BT_XPATH.get("BT-118","")) or ""
 
         for rule in self.rules:
-            rule_id  = rule.get("id", "?")
-            desc     = rule.get("desc", "")
-            bt_raw   = rule.get("bt", "")
-            category = rule.get("source", "Annexe 7 DGFiP v1.8")
-            severity = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
+            rule_id   = rule.get("id", "?")
+            desc      = rule.get("desc", "")
+            bt_raw    = rule.get("bt", "")
+            category  = rule.get("source", "Annexe 7 DGFiP v1.8")
+            severity  = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
+            covered   = rule.get("covered_by", "")
 
-            # ── Règles de calcul → Schematron ──────────────
-            if rule.get("formula"):
+            # ── Doublon XSLT — skipper si Contrôle 2 déjà exécuté ──
+            if schematron_ran and covered == "schematron":
                 result.issues.append(AiIssue(
                     rule_id=rule_id,
-                    message=f"{desc} (vérifiée par Schematron CEN)",
+                    message=f"{desc} (déjà vérifiée par Contrôle 2 — EN16931 XSLT)",
                     severity="SKIPPED", bt=bt_raw
                 ))
                 continue
-
+            
             # ── Condition TypeCode ─────────────────────────
             if rule_id in SKIP_IF_NOT_TYPE:
                 if type_code not in SKIP_IF_NOT_TYPE[rule_id]:

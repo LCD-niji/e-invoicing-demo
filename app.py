@@ -1,5 +1,5 @@
 """
-app.py
+aapp.py
 ------
 Dashboard Streamlit — Démo facturation électronique 2026
 
@@ -735,7 +735,10 @@ with tab2:
         else:
             with st.spinner("Évaluation des règles Annexe 7 DGFiP..."):
                 ai_val    = AiValidator(rules_path)
-                ai_result = ai_val.validate(tmp_path)
+                ai_result = ai_val.validate(
+                            tmp_path,
+                            schematron_ran=(sch_result is not None)
+                        )
 
             nb_tested  = len(ai_result.errors) + len(ai_result.warnings) + len(ai_result.infos)
             nb_skipped = len(ai_result.skipped)
@@ -779,14 +782,22 @@ with tab2:
                     )
                     st.markdown(html, unsafe_allow_html=True)
 
-            with st.expander(f"⏭️ {nb_skipped} règles non testables localement"):
-                st.caption(
-                    "Ces règles nécessitent un accès au PPF/annuaire DGFiP "
-                    "ou sont déjà couvertes par le Schematron CEN (Contrôle 2)."
-                )
-                for issue in ai_result.skipped:
-                    st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
+            with st.expander(f"⏭️ {nb_skipped} règles non testées localement"):
+                # Séparer les deux types de skip
+                skip_schematron = [i for i in ai_result.skipped if "Contrôle 2" in i.message]
+                skip_ppf        = [i for i in ai_result.skipped if "Contrôle 2" not in i.message]
 
+                if skip_schematron:
+                    st.markdown(f"**✅ {len(skip_schematron)} règles déjà couvertes par le Contrôle 2 (EN16931 XSLT)**")
+                    for issue in skip_schematron:
+                        st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
+
+                if skip_ppf:
+                    st.markdown(f"**⏭️ {len(skip_ppf)} règles nécessitant PPF/annuaire DGFiP**")
+                    st.caption("Ces règles ne sont pas testables en standalone — elles requièrent un accès à la plateforme de dématérialisation.")
+                    for issue in skip_ppf:
+                        st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
+                        
             st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
 
 # ═══════════════════════════════════════════
@@ -892,15 +903,3 @@ with tab4:
 # ─────────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────────
-
-st.divider()
-st.markdown("""
-<div style="text-align: center; color: #666; font-size: 0.85rem;">
-    🧾 Démo Facturation Électronique 2026 &nbsp;·&nbsp;
-    Conforme <strong>Factur-X EN 16931</strong> &nbsp;·&nbsp;
-    Intégration <strong>Chorus Pro (PISTE)</strong><br>
-    <a href="https://www.impots.gouv.fr/professionnel/la-facturation-electronique-entre-assujettis-la-tva" target="_blank">
-        En savoir plus sur la réforme DGFiP
-    </a>
-</div>
-""", unsafe_allow_html=True)
