@@ -1,0 +1,285 @@
+{
+  "meta": {
+    "source_format": "facture_legacy_v4",
+    "source_root": "facture",
+    "target": "CII EN16931",
+    "version": "1.0",
+    "description": "Mapping format propriétaire <facture> vers Factur-X CII EN16931"
+  },
+
+  "fields": [
+
+    
+    {
+      "bt": "BT-1",
+      "label": "Numéro de facture",
+      "legacy_path": "Head/FactureNum",
+      "cii_xpath": "rsm:ExchangedDocument/ram:ID",
+      "required": true,
+      "transform": null,
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-2",
+      "label": "Date d'émission",
+      "legacy_path": "Head/FactureDate",
+      "cii_xpath": "rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString",
+      "required": true,
+      "transform": "date_dmy_to_ymd",
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-3",
+      "label": "TypeCode",
+      "legacy_path": "Head/FactureType",
+      "cii_xpath": "rsm:ExchangedDocument/ram:TypeCode",
+      "required": true,
+      "transform": null,
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-5",
+      "label": "Devise",
+      "legacy_path": "Head/Devise",
+      "cii_xpath": "ram:InvoiceCurrencyCode",
+      "required": true,
+      "transform": null,
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-9",
+      "label": "Date d'échéance",
+      "legacy_path": "Head/DtEch",
+      "cii_xpath": "ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime/udt:DateTimeString",
+      "required": false,
+      "transform": "date_dmy_to_ymd",
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-10",
+      "label": "Référence acheteur",
+      "legacy_path": "Head/AdrCptCli",
+      "cii_xpath": "ram:BuyerReference",
+      "required": false,
+      "transform": null,
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-12",
+      "label": "Numéro de contrat",
+      "legacy_path": "Head/ContratNum",
+      "cii_xpath": "ram:ContractReferencedDocument/ram:IssuerAssignedID",
+      "required": false,
+      "transform": null,
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-22",
+      "label": "Note",
+      "legacy_path": "Head/Comment",
+      "cii_xpath": "rsm:ExchangedDocument/ram:IncludedNote/ram:Content",
+      "required": false,
+      "transform": null,
+      "status": "mapped"
+    },
+    {
+      "bt": "BT-13",
+      "label": "Numéro de bon de commande",
+      "legacy_path": "Head/BonCde",
+      "cii_xpath": "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID",
+      "required": false,
+      "transform": null,
+      "status": "mapped_if_present"
+    },
+
+    
+    {
+      "bt": "BT-27",
+      "label": "Nom vendeur",
+      "legacy_path": "Seller/Name",
+      "cii_xpath": "ram:SellerTradeParty/ram:Name",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample",
+      "note": "Chemin à confirmer sur XML complet"
+    },
+    {
+      "bt": "BT-30",
+      "label": "SIRET vendeur",
+      "legacy_path": "Seller/SIRET",
+      "cii_xpath": "ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-31",
+      "label": "TVA vendeur",
+      "legacy_path": "Seller/TVA",
+      "cii_xpath": "ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID",
+      "required": false,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-35",
+      "label": "Adresse vendeur",
+      "legacy_path": "Seller/Address/Street",
+      "cii_xpath": "ram:SellerTradeParty/ram:PostalTradeAddress/ram:LineOne",
+      "required": false,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-38",
+      "label": "Ville vendeur",
+      "legacy_path": "Seller/Address/City",
+      "cii_xpath": "ram:SellerTradeParty/ram:PostalTradeAddress/ram:CityName",
+      "required": false,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-39",
+      "label": "CP vendeur",
+      "legacy_path": "Seller/Address/PostCode",
+      "cii_xpath": "ram:SellerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode",
+      "required": false,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-40",
+      "label": "Pays vendeur",
+      "legacy_path": "Seller/Address/Country",
+      "cii_xpath": "ram:SellerTradeParty/ram:PostalTradeAddress/ram:CountryID",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample",
+      "default": "FR"
+    },
+
+    
+    {
+      "bt": "BT-44",
+      "label": "Nom acheteur",
+      "legacy_path": "Buyer/Name",
+      "cii_xpath": "ram:BuyerTradeParty/ram:Name",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-47",
+      "label": "SIRET acheteur",
+      "legacy_path": "Buyer/SIRET",
+      "cii_xpath": "ram:BuyerTradeParty/ram:SpecifiedLegalOrganization/ram:ID",
+      "required": false,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-55",
+      "label": "Pays acheteur",
+      "legacy_path": "Buyer/Address/Country",
+      "cii_xpath": "ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CountryID",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample",
+      "default": "FR"
+    },
+
+   
+    {
+      "bt": "BT-126",
+      "label": "Identifiant ligne",
+      "legacy_path": "Lines/Line/LineNum",
+      "cii_xpath": "ram:AssociatedDocumentLineDocument/ram:LineID",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-153",
+      "label": "Désignation article",
+      "legacy_path": "Lines/Line/Description",
+      "cii_xpath": "ram:SpecifiedTradeProduct/ram:Name",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-129",
+      "label": "Quantité",
+      "legacy_path": "Lines/Line/Quantity",
+      "cii_xpath": "ram:SpecifiedLineTradeDelivery/ram:BilledQuantity",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-146",
+      "label": "Prix unitaire HT",
+      "legacy_path": "Lines/Line/UnitPrice",
+      "cii_xpath": "ram:NetPriceProductTradePrice/ram:ChargeAmount",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-151",
+      "label": "Code TVA ligne",
+      "legacy_path": "Lines/Line/VATCode",
+      "cii_xpath": "ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:CategoryCode",
+      "required": true,
+      "transform": "vat_rate_to_category",
+      "status": "missing_in_sample"
+    },
+
+    
+    {
+      "bt": "BT-106",
+      "label": "Total HT",
+      "legacy_path": "Totals/TotalHT",
+      "cii_xpath": "ram:SpecifiedTradeSettlementHeaderMonetarySummation/ram:LineTotalAmount",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-110",
+      "label": "Total TVA",
+      "legacy_path": "Totals/TotalTVA",
+      "cii_xpath": "ram:SpecifiedTradeSettlementHeaderMonetarySummation/ram:TaxTotalAmount",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-112",
+      "label": "Total TTC",
+      "legacy_path": "Totals/TotalTTC",
+      "cii_xpath": "ram:SpecifiedTradeSettlementHeaderMonetarySummation/ram:GrandTotalAmount",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    },
+    {
+      "bt": "BT-115",
+      "label": "Montant à payer",
+      "legacy_path": "Totals/DuePayable",
+      "cii_xpath": "ram:SpecifiedTradeSettlementHeaderMonetarySummation/ram:DuePayableAmount",
+      "required": true,
+      "transform": null,
+      "status": "missing_in_sample"
+    }
+  ],
+
+  "transforms": {
+    "date_dmy_to_ymd": "Convertit JJ/MM/AAAA en AAAAMMJJ",
+    "vat_rate_to_category": "Convertit un taux (20.0) en code catégorie (S)",
+    "normalize_siret": "Supprime espaces et tirets, garde 14 chiffres"
+  },
+
+  "missing_fields_strategy": "use_default_or_skip"
+}
