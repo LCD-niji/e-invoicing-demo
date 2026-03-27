@@ -1,573 +1,451 @@
 """
 convert_legacy.py
 -----------------
-Convertit un XML facture "legacy" (format propriétaire) vers les champs
-nécessaires à la génération d'un CII Factur-X.
+Convertit un XML legacy (format propriétaire) vers CII Factur-X EN16931.
 
-Approche : correspondance heuristique sur les noms de balises XML.
-Supporte les formats courants : SAP, Sage, Cegid, EBP, noms FR/EN.
+Exports attendus par app.py :
+  - ExtractionResult
+  - extract_from_xml(xml_content: str) -> ExtractionResult
+  - make_sample_legacy_xml() -> str
 """
-
 from __future__ import annotations
 
+import json
 import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date
-from decimal import Decimal, InvalidOperation
-from typing import Optional
+from pathlib import Path
+from typing import Any
 
-# ─────────────────────────────────────────────
-# Patterns heuristiques (lowercase, sans séparateurs)
-# ─────────────────────────────────────────────
+from lxml import etree
 
-PATTERNS: dict[str, list[str]] = {
-    # Entête facture
-    "invoice_number": [
-        "numerofacture", "invoicenumber", "nofacture", "nofact", "numfacture",
-        "referencefacture", "invoiceid", "documentnumber", "numdoc",
-        "numberfacture", "numero", "reference", "id", "pieceref",
-        "nopiece", "numpiece", "factureid", "billnumber", "billid",
-    ],
-    "issue_date": [
-        "datefacture", "invoicedate", "dateemission", "datepiece",
-        "issuedate", "emissiondate", "datecomptable", "datedu",
-        "date", "datedocument", "billdate",
-    ],
-    "due_date": [
-        "dateecheance", "duedate", "datereglement", "echeance",
-        "datepaiement", "datedelement", "datepaiement",
-    ],
-    "currency": [
-        "devise", "currency", "codemonnaie", "monnaie", "currencycode",
-    ],
-    "notes": [
-        "commentaire", "notes", "remarques", "observations", "mention",
-        "description", "note", "comment",
-    ],
+# ── Chemins par défaut ─────────────────────────────────────
+RULES_PATH    = Path("rules_engine/rules.json")
+SYNONYMS_PATH = Path("mappings/bt_synonyms.json")
 
-    # Vendeur / Fournisseur
-    "seller_name": [
-        "nomvendeur", "nomsocietevendeur", "raisonsocialevendeur",
-        "sellername", "vendeur", "fournisseur", "emetteur", "supplier",
-        "nomfournisseur", "raisonsociale", "nomsociete", "societe",
-        "companyname", "entreprise",
-    ],
-    "seller_siret": [
-        "siretvendeur", "siretfournisseur", "siretemetteur",
-        "siret", "nosiren", "sirenvendeur",
-    ],
-    "seller_vat": [
-        "tvavendeur", "vatvendeur", "numtvavendeur", "numerotvavendeur",
-        "tvaemetteur", "identifianttva", "numtva", "numerotva",
-        "tvaintracommunautaire", "vatnumber", "vatid",
-    ],
-    "seller_street": [
-        "adressevendeur", "ruevendeur", "adresse1vendeur",
-        "adressefournisseur", "streetvendeur", "addressvendeur",
-        "ligneadresse1", "adresse",
-    ],
-    "seller_city": [
-        "villevendeur", "villefournisseur", "cityvendeur",
-        "communevendeur", "ville",
-    ],
-    "seller_postal": [
-        "codepostalvendeur", "cpvendeur", "postalcodevendeur",
-        "codepostal", "cp", "zipcode",
-    ],
-    "seller_iban": [
-        "ibanvendeur", "iban", "ribvendeur", "rib",
-        "coordbancaires", "comptebancaire",
-    ],
-    "seller_bic": [
-        "bicvendeur", "bic", "swift", "swiftvendeur",
-    ],
 
-    # Acheteur / Client
-    "buyer_name": [
-        "nomacheteur", "nomclient", "nomsocieteclient",
-        "raisonsocialeclient", "buyername", "acheteur",
-        "client", "destinataire", "customer", "clientname",
-        "nomsocietedestinateur",
-    ],
-    "buyer_siret": [
-        "siretacheteur", "siretclient", "siretdestinataire",
-        "siretacheteur",
-    ],
-    "buyer_vat": [
-        "tvaacheteur", "vatclient", "numtvaclient", "numerotvaacheteur",
-        "identifiantvaclient",
-    ],
-    "buyer_street": [
-        "adresseacheteur", "adresseclient", "rueclient",
-        "streetclient", "adresse1client", "addressclient",
-    ],
-    "buyer_city": [
-        "villeacheteur", "villeclient", "cityclient",
-        "communeclient",
-    ],
-    "buyer_postal": [
-        "codepostalacheteur", "codepostalclient", "cpclient",
-        "postalcodeclient",
-    ],
+# ─────────────────────────────────────────────────────────────
+# Normalisation
+# ─────────────────────────────────────────────────────────────
+
+def _normalize(tag: str) -> str:
+    """Minuscules, sans séparateurs ni namespace."""
+    tag = re.sub(r"\{[^}]+\}", "", tag)   # retire namespace XML
+    return re.sub(r"[^a-z0-9]", "", tag.lower())
+
+
+# ─────────────────────────────────────────────────────────────
+# Chargement du mapping depuis les règles actives
+# ─────────────────────────────────────────────────────────────
+
+def _load_active_bts() -> set[str]:
+    """Retourne les BT codes actifs (f1:true) depuis rules.json."""
+    if not RULES_PATH.exists():
+        return set()
+    with open(RULES_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    active: set[str] = set()
+    for key, rules in data.items():
+        if key == "meta" or not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if rule.get("f1") is True:
+                for bt in rule.get("bt", "").split(","):
+                    active.add(bt.strip())
+    return active
+
+
+def build_field_map() -> dict[str, dict]:
+    """
+    Génère le mapping normalisé_pattern → {bt, label}
+    à partir des synonymes ET des règles actives.
+    Seuls les BT présents dans rules.json (f1:true) sont inclus.
+    """
+    if not SYNONYMS_PATH.exists():
+        return _fallback_field_map()
+
+    with open(SYNONYMS_PATH, encoding="utf-8") as f:
+        synonyms = json.load(f)
+
+    active_bts = _load_active_bts()
+
+    result: dict[str, dict] = {}
+    for bt_code, meta in synonyms.items():
+        if bt_code.startswith("_"):
+            continue
+        if active_bts and bt_code not in active_bts:
+            continue
+        label = meta.get("label", bt_code)
+        for pattern in meta.get("patterns", []):
+            key = _normalize(pattern)
+            if key not in result:
+                result[key] = {"bt": bt_code, "label": label}
+    return result
+
+
+def get_active_bt_list() -> list[dict]:
+    """Liste des BT actifs avec labels, pour le selectbox de mapping manuel."""
+    if not SYNONYMS_PATH.exists():
+        return [{"bt": k, "label": v} for k, v in _BT_LABELS.items()]
+
+    with open(SYNONYMS_PATH, encoding="utf-8") as f:
+        synonyms = json.load(f)
+    active_bts = _load_active_bts()
+
+    return sorted(
+        [{"bt": bt, "label": meta.get("label", bt)}
+         for bt, meta in synonyms.items()
+         if not bt.startswith("_") and (not active_bts or bt in active_bts)],
+        key=lambda x: x["bt"]
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# Fallback si bt_synonyms.json absent (patterns hardcodés)
+# ─────────────────────────────────────────────────────────────
+
+_BT_LABELS = {
+    "BT-1": "Numéro de facture", "BT-2": "Date d'émission",
+    "BT-3": "TypeCode",          "BT-5": "Devise",
+    "BT-9": "Date d'échéance",   "BT-10": "Référence acheteur",
+    "BT-12": "Référence contrat","BT-13": "Bon de commande",
+    "BT-22": "Note",             "BT-27": "Nom vendeur",
+    "BT-30": "SIRET vendeur",    "BT-31": "TVA vendeur",
+    "BT-35": "Rue vendeur",      "BT-37": "Ville vendeur",
+    "BT-38": "CP vendeur",       "BT-40": "Pays vendeur",
+    "BT-44": "Nom acheteur",     "BT-47": "SIRET acheteur",
+    "BT-53": "Ville acheteur",   "BT-55": "Pays acheteur",
+    "BT-84": "IBAN",             "BT-126": "N° ligne",
+    "BT-129": "Quantité",        "BT-146": "Prix unitaire",
+    "BT-151": "Code TVA ligne",  "BT-153": "Désignation",
 }
 
-# Patterns pour les lignes de facture (cherchés dans les éléments répétés)
-LINE_PATTERNS: dict[str, list[str]] = {
-    "description": [
-        "designation", "description", "libelle", "label", "desc",
-        "produit", "article", "service", "nom", "name", "intitule",
-    ],
-    "quantity": [
-        "quantite", "qty", "quantity", "qte", "nb", "nombre",
-        "qtemandataire", "volume",
-    ],
-    "unit_price": [
-        "prixunitaire", "prixunit", "unitprice", "pu", "prix",
-        "tarifunitaire", "price", "montantunitaire",
-    ],
-    "vat_rate": [
-        "tauxtva", "tva", "vatrate", "tauxtvа", "pourcentagetva",
-        "ratedtva", "taxrate",
-    ],
-    "line_total": [
-        "montantht", "totalht", "montanttotal", "linetotal",
-        "montantligne", "total",
-    ],
-}
+def _fallback_field_map() -> dict[str, dict]:
+    return {
+        # Entête
+        "facturenum":    {"bt": "BT-1",  "label": "Numéro de facture"},
+        "numfact":       {"bt": "BT-1",  "label": "Numéro de facture"},
+        "nofact":        {"bt": "BT-1",  "label": "Numéro de facture"},
+        "factureid":     {"bt": "BT-1",  "label": "Numéro de facture"},
+        "invoicenumber": {"bt": "BT-1",  "label": "Numéro de facture"},
+        "numerofacture": {"bt": "BT-1",  "label": "Numéro de facture"},
+        "facturedate":   {"bt": "BT-2",  "label": "Date d'émission"},
+        "datefact":      {"bt": "BT-2",  "label": "Date d'émission"},
+        "dateemission":  {"bt": "BT-2",  "label": "Date d'émission"},
+        "invoicedate":   {"bt": "BT-2",  "label": "Date d'émission"},
+        "facturetype":   {"bt": "BT-3",  "label": "TypeCode"},
+        "typefact":      {"bt": "BT-3",  "label": "TypeCode"},
+        "invoicetype":   {"bt": "BT-3",  "label": "TypeCode"},
+        "devise":        {"bt": "BT-5",  "label": "Devise"},
+        "currency":      {"bt": "BT-5",  "label": "Devise"},
+        "devisecomptable":{"bt": "BT-5", "label": "Devise"},
+        "dtech":         {"bt": "BT-9",  "label": "Date d'échéance"},
+        "dtecheance":    {"bt": "BT-9",  "label": "Date d'échéance"},
+        "echeance":      {"bt": "BT-9",  "label": "Date d'échéance"},
+        "dateecheance":  {"bt": "BT-9",  "label": "Date d'échéance"},
+        "duedate":       {"bt": "BT-9",  "label": "Date d'échéance"},
+        "adrcptcli":     {"bt": "BT-10", "label": "Référence acheteur"},
+        "refclient":     {"bt": "BT-10", "label": "Référence acheteur"},
+        "codeacheteur":  {"bt": "BT-10", "label": "Référence acheteur"},
+        "contratnum":    {"bt": "BT-12", "label": "Référence contrat"},
+        "nocontrat":     {"bt": "BT-12", "label": "Référence contrat"},
+        "refcontrat":    {"bt": "BT-12", "label": "Référence contrat"},
+        "boncde":        {"bt": "BT-13", "label": "Bon de commande"},
+        "boncommande":   {"bt": "BT-13", "label": "Bon de commande"},
+        "noboncommande": {"bt": "BT-13", "label": "Bon de commande"},
+        "comment":       {"bt": "BT-22", "label": "Note"},
+        "comment1":      {"bt": "BT-22", "label": "Note"},
+        "loyer":         {"bt": "BT-22", "label": "Note"},
+        # Vendeur
+        "nomfournisseur":{"bt": "BT-27", "label": "Nom vendeur"},
+        "sellername":    {"bt": "BT-27", "label": "Nom vendeur"},
+        "siretfournisseur":{"bt":"BT-30","label": "SIRET vendeur"},
+        "siretvendeur":  {"bt": "BT-30", "label": "SIRET vendeur"},
+        "tvafournisseur":{"bt": "BT-31", "label": "TVA vendeur"},
+        "numtvafournisseur":{"bt":"BT-31","label":"TVA vendeur"},
+        "adrfournisseur":{"bt": "BT-35", "label": "Rue vendeur"},
+        "ruefournisseur":{"bt": "BT-35", "label": "Rue vendeur"},
+        "villefournisseur":{"bt":"BT-37","label": "Ville vendeur"},
+        "cpfournisseur": {"bt": "BT-38", "label": "CP vendeur"},
+        "paysfournisseur":{"bt":"BT-40", "label": "Pays vendeur"},
+        "iban":          {"bt": "BT-84", "label": "IBAN"},
+        "ibanfournisseur":{"bt":"BT-84", "label": "IBAN"},
+        "bic":           {"bt": "BT-86", "label": "BIC"},
+        # Acheteur
+        "nomclient":     {"bt": "BT-44", "label": "Nom acheteur"},
+        "raisonsocialeclient":{"bt":"BT-44","label":"Nom acheteur"},
+        "buyername":     {"bt": "BT-44", "label": "Nom acheteur"},
+        "siretclient":   {"bt": "BT-47", "label": "SIRET acheteur"},
+        "siretacheteur": {"bt": "BT-47", "label": "SIRET acheteur"},
+        "villeclient":   {"bt": "BT-53", "label": "Ville acheteur"},
+        "paysclient":    {"bt": "BT-55", "label": "Pays acheteur"},
+        # Lignes
+        "designation":   {"bt": "BT-153","label": "Désignation"},
+        "description":   {"bt": "BT-153","label": "Désignation"},
+        "libelle":       {"bt": "BT-153","label": "Désignation"},
+        "quantite":      {"bt": "BT-129","label": "Quantité"},
+        "quantity":      {"bt": "BT-129","label": "Quantité"},
+        "qte":           {"bt": "BT-129","label": "Quantité"},
+        "prixunitaire":  {"bt": "BT-146","label": "Prix unitaire"},
+        "unitprice":     {"bt": "BT-146","label": "Prix unitaire"},
+        "prixht":        {"bt": "BT-146","label": "Prix unitaire"},
+        "tvaligne":      {"bt": "BT-151","label": "Code TVA ligne"},
+        "vatrateligne":  {"bt": "BT-151","label": "Code TVA ligne"},
+    }
 
-# Tags qui signalent souvent une collection de lignes
-LINE_CONTAINER_HINTS = [
-    "lignes", "lines", "items", "articles", "produits",
-    "lignesfacture", "invoicelines", "details", "lignesdetail",
-]
 
-LINE_ELEMENT_HINTS = [
-    "ligne", "line", "item", "article", "produit",
-    "lignedetail", "invoiceline", "detail",
-]
-
-
-# ─────────────────────────────────────────────
-# Résultat d'extraction
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# Structures de résultat
+# ─────────────────────────────────────────────────────────────
 
 @dataclass
-class ExtractedLine:
+class LineResult:
+    line_id:     str = ""
     description: str = ""
-    quantity: str = "1"
-    unit_price: str = "0.00"
-    vat_rate: str = "20"
+    quantity:    float = 1.0
+    unit_price:  float = 0.0
+    vat_rate:    float = 20.0
+    unit:        str = "C62"
+    raw_fields:  dict = field(default_factory=dict)
 
 
 @dataclass
 class ExtractionResult:
-    # Entête
-    invoice_number: str = ""
-    issue_date: str = ""
-    due_date: str = ""
-    currency: str = "EUR"
-    notes: str = ""
-
-    # Vendeur
-    seller_name: str = ""
-    seller_siret: str = ""
-    seller_vat: str = ""
-    seller_street: str = ""
-    seller_city: str = ""
-    seller_postal: str = ""
-    seller_iban: str = ""
-    seller_bic: str = ""
-
-    # Acheteur
-    buyer_name: str = ""
-    buyer_siret: str = ""
-    buyer_vat: str = ""
-    buyer_street: str = ""
-    buyer_city: str = ""
-    buyer_postal: str = ""
-
+    # Champs mappés
+    mapped: dict[str, str] = field(default_factory=dict)
     # Lignes
-    lines: list[ExtractedLine] = field(default_factory=list)
+    lines: list[LineResult] = field(default_factory=list)
+    # Tags non reconnus : {tag_norm: (tag_original, valeur)}
+    unmatched_tags: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Stats
+    total_tags:   int = 0
+    matched_tags: int = 0
 
-    # Métadonnées d'extraction
-    matched_fields: dict[str, str] = field(default_factory=dict)   # field → xpath matched
-    unmatched_tags: list[str] = field(default_factory=list)
-
-
-# ─────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────
-
-def _normalize(tag: str) -> str:
-    """Lowercase + supprime séparateurs et namespaces."""
-    tag = re.sub(r"\{[^}]+\}", "", tag)   # namespace {uri}
-    tag = re.sub(r"[^a-z0-9]", "", tag.lower())
-    return tag
+    @property
+    def match_rate(self) -> float:
+        if self.total_tags == 0:
+            return 0.0
+        return round(self.matched_tags / self.total_tags * 100, 1)
 
 
-def _score(tag_norm: str, patterns: list[str]) -> int:
-    """Retourne un score de correspondance (0 = aucun)."""
-    if tag_norm in patterns:
-        return 100                       # exact match
-    for p in patterns:
-        if tag_norm.endswith(p) or tag_norm.startswith(p):
-            return 80
-        if p in tag_norm or tag_norm in p:
-            return 50
-    return 0
-
-
-def _flatten(element: ET.Element, prefix: str = "") -> list[tuple[str, str, str]]:
-    """Retourne une liste (xpath, tag_norm, text) pour tous les nœuds."""
-    results = []
-    tag_norm = _normalize(element.tag)
-    xpath = f"{prefix}/{element.tag}" if prefix else element.tag
-    text = (element.text or "").strip()
-    if text:
-        results.append((xpath, tag_norm, text))
-    # Attributs (parfois les données sont dans des attrs)
-    for attr_name, attr_val in element.attrib.items():
-        attr_val = attr_val.strip()
-        if attr_val:
-            results.append((f"{xpath}@{attr_name}", _normalize(attr_name), attr_val))
-    for child in element:
-        results.extend(_flatten(child, xpath))
-    return results
-
+# ─────────────────────────────────────────────────────────────
+# Utilitaires date
+# ─────────────────────────────────────────────────────────────
 
 def _parse_date(raw: str) -> str:
-    """Essaye de normaliser une date en YYYY-MM-DD."""
+    """Normalise vers AAAA-MM-JJ."""
     raw = raw.strip()
+    # DD/MM/YYYY
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", raw)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
     # YYYYMMDD
     m = re.match(r"^(\d{4})(\d{2})(\d{2})$", raw)
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    # DD/MM/YYYY or DD-MM-YYYY
-    m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", raw)
-    if m:
-        return f"{m.group(3)}-{m.group(2).zfill(2)}-{m.group(1).zfill(2)}"
-    # already YYYY-MM-DD
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
-    if m:
-        return raw[:10]
+    # YYYY-MM-DD déjà bon
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return raw
     return raw
 
 
-def _find_line_elements(root: ET.Element) -> list[ET.Element]:
-    """Tente de détecter les éléments répétés correspondant aux lignes."""
-    # 1. Chercher un container connu
-    for elem in root.iter():
-        tag_norm = _normalize(elem.tag)
-        if tag_norm in LINE_CONTAINER_HINTS:
-            children = list(elem)
-            if len(children) >= 1:
-                return children
+def _parse_amount(raw: str) -> float:
+    try:
+        return float(raw.replace(",", ".").replace(" ", "").replace("\xa0", ""))
+    except Exception:
+        return 0.0
 
-    # 2. Chercher des éléments dont le tag ressemble à une ligne
-    candidates: dict[str, list[ET.Element]] = {}
-    for elem in root.iter():
-        tag_norm = _normalize(elem.tag)
-        if tag_norm in LINE_ELEMENT_HINTS:
-            candidates.setdefault(elem.tag, []).append(elem)
 
-    if candidates:
-        # Prendre le groupe le plus grand
-        best = max(candidates.values(), key=len)
-        return best
+# ─────────────────────────────────────────────────────────────
+# Détection des lignes répétées
+# ─────────────────────────────────────────────────────────────
 
-    # 3. Chercher des groupes d'éléments répétés (même tag, plusieurs fois)
-    tag_counts: dict[str, list[ET.Element]] = {}
-    for elem in root.iter():
-        tag_counts.setdefault(elem.tag, []).append(elem)
+def _find_line_elements(root: etree._Element) -> list[etree._Element]:
+    """3 stratégies pour détecter les lignes de facture répétées."""
+    LINE_HINTS = ["ligne", "line", "detail", "article", "item",
+                  "prestation", "service", "produit", "product"]
 
-    repeated = {t: els for t, els in tag_counts.items()
-                if len(els) >= 2 and any(
-                    _normalize(c.tag) in LINE_PATTERNS["description"] or
-                    _normalize(c.tag) in LINE_PATTERNS["unit_price"]
-                    for el in els for c in el
-                )}
-    if repeated:
-        best = max(repeated.values(), key=len)
-        return best
+    # Stratégie 1 : balise répétée > 1 fois avec un hint
+    tag_counts: dict[str, list] = {}
+    for el in root.iter():
+        t = _normalize(el.tag)
+        tag_counts.setdefault(t, []).append(el)
+    for hint in LINE_HINTS:
+        for tag, elements in tag_counts.items():
+            if hint in tag and len(elements) > 1:
+                return elements
+
+    # Stratégie 2 : parent contenant des éléments répétés avec hint
+    for el in root.iter():
+        children_tags = [_normalize(c.tag) for c in el]
+        if len(children_tags) > 1 and len(set(children_tags)) == 1:
+            if any(h in children_tags[0] for h in LINE_HINTS):
+                return list(el)
+
+    # Stratégie 3 : groupe d'éléments contenant montant + quantité
+    for el in root.iter():
+        children = list(el)
+        if len(children) >= 2:
+            has_qty    = any("quantit" in _normalize(c.tag) or
+                             _normalize(c.tag) in ("qte","qty") for c in children)
+            has_amount = any("prix" in _normalize(c.tag) or
+                             "price" in _normalize(c.tag) or
+                             "montant" in _normalize(c.tag) for c in children)
+            if has_qty and has_amount:
+                return [el]
 
     return []
 
 
-def _extract_line(element: ET.Element) -> ExtractedLine:
-    """Extrait les champs d'une ligne depuis un élément XML."""
-    flat = _flatten(element)
-    line = ExtractedLine()
-    for _, tag_norm, text in flat:
-        for field_key, patterns in LINE_PATTERNS.items():
-            if _score(tag_norm, patterns) >= 50:
-                if field_key == "description" and not line.description:
-                    line.description = text
-                elif field_key == "quantity" and not line.quantity:
-                    line.quantity = text.replace(",", ".")
-                elif field_key == "unit_price" and not line.unit_price:
-                    line.unit_price = text.replace(",", ".")
-                elif field_key == "vat_rate" and not line.vat_rate:
-                    # Normaliser : "20%" → "20", "0.20" → "20"
-                    raw = text.replace("%", "").replace(",", ".").strip()
-                    try:
-                        val = float(raw)
-                        if val < 1:
-                            val *= 100
-                        line.vat_rate = str(int(val))
-                    except ValueError:
-                        line.vat_rate = raw
-    return line
-
-
-# ─────────────────────────────────────────────
-# Point d'entrée principal
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# Extraction principale
+# ─────────────────────────────────────────────────────────────
 
 def extract_from_xml(xml_content: str) -> ExtractionResult:
     """
-    Parse un XML legacy et extrait les champs de facturation par heuristique.
-
-    Returns:
-        ExtractionResult avec tous les champs détectés.
+    Extrait les champs CII depuis un XML legacy quelconque.
+    Utilise le mapping dérivé de rules.json + bt_synonyms.json.
     """
-    result = ExtractionResult()
+    result     = ExtractionResult()
+    field_map  = build_field_map()
 
+    # Parser le XML (tolérant aux encodages)
     try:
-        root = ET.fromstring(xml_content)
-    except ET.ParseError as e:
-        raise ValueError(f"XML invalide : {e}")
+        content_bytes = xml_content.encode("utf-8", errors="replace")
+        root = etree.fromstring(content_bytes)
+    except Exception:
+        try:
+            root = etree.fromstring(xml_content.encode("latin-1", errors="replace"))
+        except Exception as e:
+            result.unmatched_tags["_parse_error"] = ("error", str(e))
+            return result
 
-    flat = _flatten(root)
-
-    # Score chaque nœud contre les patterns
-    best: dict[str, tuple[int, str]] = {}   # field_key → (score, value)
-
-    for xpath, tag_norm, text in flat:
-        for field_key, patterns in PATTERNS.items():
-            s = _score(tag_norm, patterns)
-            if s > 0:
-                current_score, _ = best.get(field_key, (0, ""))
-                if s > current_score:
-                    best[field_key] = (s, text)
-
-    # Appliquer les valeurs
-    for field_key, (score, value) in best.items():
-        matched_tag = next(
-            (xpath for xpath, tn, tx in flat
-             if tx == value and _score(tn, PATTERNS[field_key]) == score),
-            "?"
-        )
-        result.matched_fields[field_key] = matched_tag
-
-        if field_key == "invoice_number":
-            result.invoice_number = value
-        elif field_key == "issue_date":
-            result.issue_date = _parse_date(value)
-        elif field_key == "due_date":
-            result.due_date = _parse_date(value)
-        elif field_key == "currency":
-            result.currency = value.upper()
-        elif field_key == "notes":
-            result.notes = value
-        elif field_key == "seller_name":
-            result.seller_name = value
-        elif field_key == "seller_siret":
-            result.seller_siret = re.sub(r"\D", "", value)
-        elif field_key == "seller_vat":
-            result.seller_vat = value
-        elif field_key == "seller_street":
-            result.seller_street = value
-        elif field_key == "seller_city":
-            result.seller_city = value
-        elif field_key == "seller_postal":
-            result.seller_postal = value
-        elif field_key == "seller_iban":
-            result.seller_iban = value.replace(" ", "")
-        elif field_key == "seller_bic":
-            result.seller_bic = value
-        elif field_key == "buyer_name":
-            result.buyer_name = value
-        elif field_key == "buyer_siret":
-            result.buyer_siret = re.sub(r"\D", "", value)
-        elif field_key == "buyer_vat":
-            result.buyer_vat = value
-        elif field_key == "buyer_street":
-            result.buyer_street = value
-        elif field_key == "buyer_city":
-            result.buyer_city = value
-        elif field_key == "buyer_postal":
-            result.buyer_postal = value
-
-    # Tags non matchés
-    matched_tags = set()
-    for field_key, (score, value) in best.items():
-        for xpath, tn, tx in flat:
-            if tx == value and _score(tn, PATTERNS[field_key]) == score:
-                matched_tags.add(tn)
-                break
-
-    result.unmatched_tags = list({
-        tn for _, tn, tx in flat if tn not in matched_tags and tx
-    })
-
-    # Extraction des lignes
+    # Détecter les lignes d'abord pour les exclure du mapping entête
     line_elements = _find_line_elements(root)
-    for elem in line_elements:
-        line = _extract_line(elem)
-        if line.description or line.unit_price != "0.00":
+    line_el_ids   = {id(el) for el in line_elements}
+    line_ancestor_ids: set[int] = set()
+    for line_el in line_elements:
+        parent = line_el.getparent()
+        if parent is not None:
+            line_ancestor_ids.add(id(parent))
+
+    # ── Mapping des champs entête ──────────────────────────
+    for el in root.iter():
+        if id(el) in line_el_ids:
+            continue
+        if id(el) in line_ancestor_ids:
+            continue
+        if el.text is None or not el.text.strip():
+            continue
+
+        tag_norm = _normalize(el.tag)
+        value    = el.text.strip()
+        result.total_tags += 1
+
+        if tag_norm in field_map:
+            bt    = field_map[tag_norm]["bt"]
+            label = field_map[tag_norm]["label"]
+            # Ne pas écraser si déjà mappé avec une valeur non vide
+            if bt not in result.mapped or not result.mapped[bt]:
+                result.mapped[bt] = value
+                result.matched_tags += 1
+        else:
+            result.unmatched_tags[tag_norm] = (el.tag, value)
+
+    # ── Post-traitement dates ──────────────────────────────
+    for bt in ("BT-2", "BT-9"):
+        if bt in result.mapped:
+            result.mapped[bt] = _parse_date(result.mapped[bt])
+
+    # ── Mapping des lignes ─────────────────────────────────
+    for i, line_el in enumerate(line_elements, start=1):
+        line = LineResult(line_id=str(i))
+        line_field_map = {
+            k: v for k, v in field_map.items()
+            if v["bt"] in ("BT-126","BT-129","BT-130","BT-131",
+                           "BT-146","BT-151","BT-153","BT-154")
+        }
+        for child in line_el.iter():
+            if child.text is None or not child.text.strip():
+                continue
+            tag_norm = _normalize(child.tag)
+            value    = child.text.strip()
+            if tag_norm in line_field_map:
+                bt = line_field_map[tag_norm]["bt"]
+                line.raw_fields[bt] = value
+                if bt == "BT-153":
+                    line.description = value
+                elif bt == "BT-129":
+                    line.quantity = _parse_amount(value)
+                elif bt == "BT-146":
+                    line.unit_price = _parse_amount(value)
+                elif bt == "BT-151":
+                    raw_vat = value.replace("%","").strip()
+                    try:
+                        line.vat_rate = float(raw_vat)
+                    except Exception:
+                        line.vat_rate = 20.0
+                elif bt == "BT-126":
+                    line.line_id = value
+
+        if line.description or line.unit_price:
             result.lines.append(line)
 
     return result
 
 
+# ─────────────────────────────────────────────────────────────
+# XML d'exemple générique (pour la démo)
+# ─────────────────────────────────────────────────────────────
+
 def make_sample_legacy_xml() -> str:
-    """Génère un XML legacy d'exemple pour les tests."""
     return """<?xml version="1.0" encoding="UTF-8"?>
 <Facture>
   <Entete>
-    <NumeroFacture>FAC-2026-0042</NumeroFacture>
-    <DateFacture>15/03/2026</DateFacture>
-    <DateEcheance>15/04/2026</DateEcheance>
+    <FactureNum>FAC-2026-001</FactureNum>
+    <FactureDate>15/03/2026</FactureDate>
+    <FactureType>380</FactureType>
+    <ContratNum>CTR-2026-042</ContratNum>
+    <BonCde>BC-98765</BonCde>
+    <DtEch>14/04/2026</DtEch>
     <Devise>EUR</Devise>
+    <AdrCptCli>C100042</AdrCptCli>
+    <Comment>Prestation de conseil en transformation numérique — Mars 2026</Comment>
   </Entete>
-
   <Fournisseur>
-    <RaisonSociale>ACME Solutions SAS</RaisonSociale>
-    <SIRET>35609901000036</SIRET>
-    <NumTVA>FR72356099010</NumTVA>
-    <Adresse>12 rue de la Paix</Adresse>
-    <CodePostal>75001</CodePostal>
-    <Ville>Paris</Ville>
+    <NomFournisseur>Acme Conseil SAS</NomFournisseur>
+    <SIRETFournisseur>12345678901234</SIRETFournisseur>
+    <TVAFournisseur>FR12345678901</TVAFournisseur>
+    <AdrFournisseur>12 rue de la Paix</AdrFournisseur>
+    <CPFournisseur>75001</CPFournisseur>
+    <VilleFournisseur>Paris</VilleFournisseur>
+    <PaysFournisseur>FR</PaysFournisseur>
     <IBAN>FR7630006000011234567890189</IBAN>
-    <BIC>BNPAFRPPXXX</BIC>
+    <BIC>BNPAFRPP</BIC>
   </Fournisseur>
-
   <Client>
-    <RaisonSociale>Mairie de Lyon</RaisonSociale>
-    <SIRET>21690123400015</SIRET>
-    <NumTVA>FR83216901234</NumTVA>
-    <Adresse>Place de la Comédie</Adresse>
-    <CodePostal>69001</CodePostal>
-    <Ville>Lyon</Ville>
+    <NomClient>Dupont Industries SARL</NomClient>
+    <SIRETClient>98765432109876</SIRETClient>
+    <VilleClient>Lyon</VilleClient>
+    <PaysClient>FR</PaysClient>
   </Client>
-
   <Lignes>
     <Ligne>
-      <Designation>Audit système de facturation</Designation>
+      <Designation>Audit système de facturation électronique</Designation>
       <Quantite>3</Quantite>
       <PrixUnitaire>800.00</PrixUnitaire>
-      <TauxTVA>20</TauxTVA>
+      <TVALigne>20</TVALigne>
     </Ligne>
     <Ligne>
-      <Designation>Implémentation connecteur</Designation>
+      <Designation>Implémentation connecteur Chorus Pro</Designation>
       <Quantite>5</Quantite>
       <PrixUnitaire>950.00</PrixUnitaire>
-      <TauxTVA>20</TauxTVA>
+      <TVALigne>20</TVALigne>
     </Ligne>
     <Ligne>
-      <Designation>Formation équipe comptable</Designation>
+      <Designation>Formation équipe comptable (2 jours)</Designation>
       <Quantite>2</Quantite>
       <PrixUnitaire>600.00</PrixUnitaire>
-      <TauxTVA>20</TauxTVA>
+      <TVALigne>20</TVALigne>
     </Ligne>
   </Lignes>
-
-  <Commentaire>Facture relative au projet de dématérialisation 2026</Commentaire>
-</Facture>
-"""
-import json
-import re
-from pathlib import Path
-
-
-def _normalize(tag: str) -> str:
-    """Normalise un nom de balise : minuscules, sans séparateurs."""
-    return re.sub(r"[^a-z0-9]", "", tag.lower())
-
-
-def build_field_map(
-    rules_path: str = "rules_engine/rules.json",
-    synonyms_path: str = "mappings/bt_synonyms.json",
-) -> dict[str, dict]:
-    """
-    Génère le mapping legacy → CII à partir des règles actives (f1:true)
-    et du fichier de synonymes.
-
-    Retourne un dict :
-    {
-      "normalized_pattern": {
-        "bt": "BT-1",
-        "label": "Numéro de facture",
-        "score_bonus": 0
-      },
-      ...
-    }
-    """
-    # 1. Charger les BT actifs depuis rules.json (f1:true uniquement)
-    with open(rules_path, encoding="utf-8") as f:
-        rules_data = json.load(f)
-
-    active_bts: set[str] = set()
-    for key, rules in rules_data.items():
-        if key == "meta" or not isinstance(rules, list):
-            continue
-        for rule in rules:
-            if rule.get("f1") is True:
-                for bt in rule.get("bt", "").split(","):
-                    active_bts.add(bt.strip())
-
-    # 2. Charger les synonymes
-    with open(synonyms_path, encoding="utf-8") as f:
-        synonyms_data = json.load(f)
-
-    # 3. Construire le mapping — uniquement les BT actifs dans les règles
-    field_map: dict[str, dict] = {}
-    for bt_code, meta in synonyms_data.items():
-        if bt_code.startswith("_"):
-            continue
-        if bt_code not in active_bts:
-            continue  # BT non utilisé dans les règles actives → ignoré
-        label    = meta.get("label", bt_code)
-        patterns = meta.get("patterns", [])
-        for pattern in patterns:
-            key = _normalize(pattern)
-            if key not in field_map:
-                field_map[key] = {"bt": bt_code, "label": label}
-
-    return field_map
-
-
-def get_active_bt_list(
-    rules_path: str = "rules_engine/rules.json",
-    synonyms_path: str = "mappings/bt_synonyms.json",
-) -> list[dict]:
-    """
-    Retourne la liste des BT actifs avec leurs labels,
-    pour alimenter le selectbox de mapping manuel dans l'UI.
-    """
-    with open(synonyms_path, encoding="utf-8") as f:
-        synonyms_data = json.load(f)
-
-    with open(rules_path, encoding="utf-8") as f:
-        rules_data = json.load(f)
-
-    active_bts: set[str] = set()
-    for key, rules in rules_data.items():
-        if key == "meta" or not isinstance(rules, list):
-            continue
-        for rule in rules:
-            if rule.get("f1") is True:
-                for bt in rule.get("bt", "").split(","):
-                    active_bts.add(bt.strip())
-
-    return [
-        {"bt": bt, "label": meta.get("label", bt)}
-        for bt, meta in synonyms_data.items()
-        if not bt.startswith("_") and bt in active_bts
-    ]mkdir -p mappings
-# Créer mappings/bt_synonyms.json
-# Mettre à jour convert_legacy.py (build_field_map + get_active_bt_list)
-git add mappings/bt_synonyms.json convert_legacy.py
-git commit -m "feat: mapping dynamique BT ← rules.json + bt_synonyms.json"
-git push
+</Facture>"""
