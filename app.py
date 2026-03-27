@@ -16,15 +16,17 @@ Lancement :
     streamlit run app.py
 """
 
+import re
 import sys
 import time
 import uuid
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from schematron_validator import validate_en16931, SchematronResult
 from rules_engine.ai_validator import AiValidator, AiResult
+from convert_legacy import extract_from_xml, make_sample_legacy_xml, ExtractionResult
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -144,11 +146,12 @@ Cette démo illustre une implémentation complète de la **réforme facturation 
 # Tabs
 # ─────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📝 Saisie facture",
     "✅ Validation",
     "🚀 Dépôt Chorus Pro",
-    "📊 Statut & Suivi"
+    "📊 Statut & Suivi",
+    "🔄 Conversion XML Legacy",
 ])
 
 
@@ -722,7 +725,7 @@ with tab2:
         st.divider()
         st.markdown("#### 📋 Contrôle 3 — Règles de gestion DGFiP (Annexe 7 v1.8)")
         st.caption(
-            "En plus de la norme européenne, la DGFiP a publié 235 règles de gestion spécifiques "
+            "En plus de la norme européenne, la DGFiP a publié des règles de gestion spécifiques "
             "à la France (Annexe 7, mise à jour octobre 2025). Elles couvrent les particularités "
             "fiscales françaises : SIRET obligatoire, régimes de TVA FR, mentions légales, "
             "avoirs et rectificatives. Ces règles s'appliquent uniquement aux factures émises "
@@ -740,15 +743,34 @@ with tab2:
                             schematron_ran=(sch_result is not None)
                         )
 
+            import json as _json
+            with open(rules_path, encoding="utf-8") as _f:
+                _data = _json.load(_f)
+            nb_total_annexe7 = sum(
+                len(v) for k, v in _data.items() if k != "meta" and isinstance(v, list)
+            )
+            nb_applicable = len(ai_val.rules)           # f1=true : dans le périmètre de la démo
+            nb_hors_perim = nb_total_annexe7 - nb_applicable  # f1=false : calculs, PPF, inter-systèmes
             nb_tested  = len(ai_result.errors) + len(ai_result.warnings) + len(ai_result.infos)
             nb_skipped = len(ai_result.skipped)
 
             col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns(5)
             col_a1.metric("Statut Annexe 7", "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
-            col_a2.metric("Règles testées",  nb_tested)
-            col_a3.metric("Erreurs",         len(ai_result.errors))
-            col_a4.metric("Warnings",        len(ai_result.warnings))
-            col_a5.metric("Non testables",   nb_skipped)
+            col_a2.metric("Total Annexe 7",  nb_total_annexe7,
+                          help=f"{nb_applicable} dans le périmètre démo • {nb_hors_perim} hors périmètre (calculs, PPF/annuaire)")
+            col_a3.metric("Testées ici",     nb_tested,
+                          help="Règles évaluées sur la facture : présence, format, codelist, conditions")
+            col_a4.metric("Erreurs",         len(ai_result.errors))
+            col_a5.metric("Non testables ici", nb_skipped,
+                          help="Skippées : déjà couvertes par Contrôle 2, ou nécessitent PPF/annuaire DGFiP")
+            st.caption(
+                f"ℹ️ Sur les {nb_total_annexe7} règles de l'Annexe 7 : **{nb_applicable} sont évaluables en local** "
+                f"(présence de champs, formats, codelists, conditions). "
+                f"Les **{nb_hors_perim} autres** concernent des calculs de montants (délégués au Contrôle 2 — XSLT CEN) "
+                f"ou des vérifications PPF/annuaire qui nécessitent un accès à la plateforme de dématérialisation. "
+                f"Parmi les {nb_applicable} règles locales : **{nb_tested} ont été testées** et **{nb_skipped} ont été ignorées** "
+                f"(non applicables à cette facture : TypeCode différent, catégorie TVA non concernée, ou champ optionnel absent)."
+            )
 
             for issue in ai_result.errors:
                 html = (
@@ -782,19 +804,20 @@ with tab2:
                     )
                     st.markdown(html, unsafe_allow_html=True)
 
-            with st.expander(f"⏭️ {nb_skipped} règles non testées localement"):
+            with st.expander(f"⏭️ Détail des {nb_skipped} règles ignorées pour cette facture (sur {nb_applicable} dans le périmètre)"):
                 # Séparer les deux types de skip
                 skip_schematron = [i for i in ai_result.skipped if "Contrôle 2" in i.message]
                 skip_ppf        = [i for i in ai_result.skipped if "Contrôle 2" not in i.message]
 
                 if skip_schematron:
                     st.markdown(f"**✅ {len(skip_schematron)} règles déjà couvertes par le Contrôle 2 (EN16931 XSLT)**")
+                    st.caption("Ces règles sont bien validées — mais par le moteur XSLT officiel CEN, pas ici.")
                     for issue in skip_schematron:
                         st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
 
                 if skip_ppf:
-                    st.markdown(f"**⏭️ {len(skip_ppf)} règles nécessitant PPF/annuaire DGFiP**")
-                    st.caption("Ces règles ne sont pas testables en standalone — elles requièrent un accès à la plateforme de dématérialisation.")
+                    st.markdown(f"**⏭️ {len(skip_ppf)} règles non applicables à cette facture**")
+                    st.caption("Ces règles sont conditionnelles (TypeCode spécifique, catégorie TVA particulière, champ optionnel absent) ou nécessitent un accès PPF/annuaire DGFiP.")
                     for issue in skip_ppf:
                         st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
                         
@@ -898,6 +921,227 @@ with tab4:
             progress_bar.progress(1.0)
             st.success("🎉 Facture traitée avec succès — Paiement programmé !")
             st.balloons()
+
+
+# ═══════════════════════════════════════════
+# TAB 5 — Conversion XML Legacy → Factur-X
+# ═══════════════════════════════════════════
+
+with tab5:
+    st.subheader("Conversion XML Legacy → Factur-X CII")
+    st.caption(
+        "Vous avez une facture dans un format XML propriétaire (SAP, Sage, Cegid, EBP…) ? "
+        "Uploadez-la ici : le système détecte automatiquement les champs par heuristique, "
+        "vous permet de corriger les données, puis génère un XML Factur-X CII conforme à la réforme 2026."
+    )
+
+    col_upload, col_sample = st.columns([3, 1])
+    with col_upload:
+        legacy_file = st.file_uploader(
+            "Charger un XML legacy",
+            type=["xml"],
+            key="legacy_xml_upload",
+            help="Format propriétaire : SAP, Sage, Cegid, EBP, ou tout XML de facturation interne"
+        )
+    with col_sample:
+        st.markdown("&nbsp;")
+        if st.button("📄 Charger un exemple", use_container_width=True, key="load_sample_legacy"):
+            st.session_state["legacy_xml_content"] = make_sample_legacy_xml()
+
+    # Source XML : upload ou exemple
+    legacy_xml_content = None
+    if legacy_file:
+        raw = legacy_file.read()
+        try:
+            legacy_xml_content = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            legacy_xml_content = raw.decode("latin-1")
+        st.session_state["legacy_xml_content"] = legacy_xml_content
+    elif "legacy_xml_content" in st.session_state:
+        legacy_xml_content = st.session_state["legacy_xml_content"]
+
+    if legacy_xml_content:
+        with st.expander("📄 XML source (aperçu)", expanded=False):
+            st.code("\n".join(legacy_xml_content.split("\n")[:60]), language="xml")
+
+        # Extraction heuristique
+        try:
+            extracted = extract_from_xml(legacy_xml_content)
+        except ValueError as e:
+            st.error(f"❌ {e}")
+            extracted = None
+
+        if extracted:
+            # Rapport d'extraction
+            nb_matched = sum(1 for v in [
+                extracted.invoice_number, extracted.issue_date,
+                extracted.seller_name, extracted.seller_siret,
+                extracted.buyer_name,
+            ] if v)
+            nb_lines   = len(extracted.lines)
+
+            col_r1, col_r2, col_r3 = st.columns(3)
+            col_r1.metric("Champs détectés", len(extracted.matched_fields))
+            col_r2.metric("Lignes détectées", nb_lines)
+            col_r3.metric("Champs non mappés", len(extracted.unmatched_tags))
+
+            if extracted.matched_fields:
+                with st.expander("🔍 Correspondances détectées", expanded=False):
+                    for field_key, xpath in extracted.matched_fields.items():
+                        st.markdown(f"- `{field_key}` ← `{xpath}`")
+            if extracted.unmatched_tags:
+                with st.expander(f"⚠️ {len(extracted.unmatched_tags)} tags non reconnus", expanded=False):
+                    st.caption("Ces balises n'ont pas pu être mappées automatiquement.")
+                    st.write(", ".join(f"`{t}`" for t in sorted(extracted.unmatched_tags)))
+
+            st.divider()
+            st.markdown("#### ✏️ Vérifiez et complétez les données extraites")
+            st.caption("Les champs pré-remplis proviennent du XML source. Corrigez si nécessaire avant de générer le Factur-X.")
+
+            with st.form("legacy_conversion_form"):
+                st.markdown("**Entête de facture**")
+                fc1, fc2, fc3 = st.columns(3)
+                conv_number   = fc1.text_input("Numéro de facture *", value=extracted.invoice_number)
+                conv_date_str = fc2.text_input("Date d'émission * (YYYY-MM-DD)", value=extracted.issue_date)
+                conv_due_str  = fc3.text_input("Date d'échéance * (YYYY-MM-DD)", value=extracted.due_date)
+
+                st.markdown("**Vendeur (émetteur)**")
+                fv1, fv2, fv3 = st.columns(3)
+                conv_seller_name   = fv1.text_input("Raison sociale *", value=extracted.seller_name, key="cs_name")
+                conv_seller_siret  = fv2.text_input("SIRET (14 chiffres) *", value=extracted.seller_siret, key="cs_siret")
+                conv_seller_vat    = fv3.text_input("N° TVA intracommunautaire *", value=extracted.seller_vat, key="cs_vat")
+                fv4, fv5, fv6 = st.columns(3)
+                conv_seller_street = fv4.text_input("Adresse", value=extracted.seller_street, key="cs_street")
+                conv_seller_postal = fv5.text_input("Code postal", value=extracted.seller_postal, key="cs_postal")
+                conv_seller_city   = fv6.text_input("Ville", value=extracted.seller_city, key="cs_city")
+                fi1, fi2 = st.columns(2)
+                conv_seller_iban   = fi1.text_input("IBAN", value=extracted.seller_iban, key="cs_iban")
+                conv_seller_bic    = fi2.text_input("BIC", value=extracted.seller_bic, key="cs_bic")
+
+                st.markdown("**Acheteur (destinataire)**")
+                fa1, fa2, fa3 = st.columns(3)
+                conv_buyer_name    = fa1.text_input("Raison sociale *", value=extracted.buyer_name, key="cb_name")
+                conv_buyer_siret   = fa2.text_input("SIRET (14 chiffres) *", value=extracted.buyer_siret, key="cb_siret")
+                conv_buyer_vat     = fa3.text_input("N° TVA intracommunautaire", value=extracted.buyer_vat, key="cb_vat")
+                fa4, fa5, fa6 = st.columns(3)
+                conv_buyer_street  = fa4.text_input("Adresse", value=extracted.buyer_street, key="cb_street")
+                conv_buyer_postal  = fa5.text_input("Code postal", value=extracted.buyer_postal, key="cb_postal")
+                conv_buyer_city    = fa6.text_input("Ville", value=extracted.buyer_city, key="cb_city")
+
+                st.markdown("**Lignes de facture**")
+                if not extracted.lines:
+                    st.warning("⚠️ Aucune ligne détectée — ajoutez au moins une ligne manuellement.")
+                    extracted.lines = [type("L", (), {"description":"", "quantity":"1", "unit_price":"0.00", "vat_rate":"20"})()]
+
+                conv_lines = []
+                for i, ln in enumerate(extracted.lines):
+                    ll1, ll2, ll3, ll4 = st.columns([4, 1, 2, 1])
+                    desc  = ll1.text_input(f"Description #{i+1}", value=ln.description, key=f"cl_desc_{i}")
+                    qty   = ll2.text_input(f"Qté #{i+1}",         value=ln.quantity,    key=f"cl_qty_{i}")
+                    price = ll3.text_input(f"Prix HT #{i+1}",     value=ln.unit_price,  key=f"cl_price_{i}")
+                    vat   = ll4.text_input(f"TVA% #{i+1}",        value=ln.vat_rate,    key=f"cl_vat_{i}")
+                    conv_lines.append((desc, qty, price, vat))
+
+                submitted_conv = st.form_submit_button(
+                    "⚙️ Générer le XML Factur-X CII", type="primary", use_container_width=True
+                )
+
+            if submitted_conv:
+                errors_conv = []
+                if not conv_number:
+                    errors_conv.append("Numéro de facture manquant")
+                if not conv_seller_siret or len(re.sub(r"\D", "", conv_seller_siret)) != 14:
+                    errors_conv.append("SIRET vendeur invalide (14 chiffres requis)")
+                if not conv_buyer_siret or len(re.sub(r"\D", "", conv_buyer_siret)) != 14:
+                    errors_conv.append("SIRET acheteur invalide (14 chiffres requis)")
+
+                try:
+                    conv_issue_date = date.fromisoformat(conv_date_str)
+                except ValueError:
+                    errors_conv.append(f"Date d'émission invalide : '{conv_date_str}' (format attendu YYYY-MM-DD)")
+                    conv_issue_date = date.today()
+                try:
+                    conv_due_date = date.fromisoformat(conv_due_str) if conv_due_str else conv_issue_date + timedelta(days=30)
+                except ValueError:
+                    conv_due_date = conv_issue_date + timedelta(days=30)
+
+                if errors_conv:
+                    for err in errors_conv:
+                        st.error(f"❌ {err}")
+                else:
+                    try:
+                        from generate_invoice import Address, Invoice, InvoiceLine, Party
+
+                        def _make_addr(street, postal, city):
+                            return Address(
+                                street=street or "—",
+                                city=city or "—",
+                                postal_code=postal or "00000",
+                                country_code="FR",
+                            )
+
+                        seller_conv = Party(
+                            name=conv_seller_name,
+                            siret=re.sub(r"\D", "", conv_seller_siret),
+                            vat_number=conv_seller_vat or f"FR00{re.sub(r'D','',conv_seller_siret)[:9]}",
+                            address=_make_addr(conv_seller_street, conv_seller_postal, conv_seller_city),
+                            iban=conv_seller_iban or None,
+                            bic=conv_seller_bic or None,
+                        )
+                        buyer_conv = Party(
+                            name=conv_buyer_name,
+                            siret=re.sub(r"\D", "", conv_buyer_siret),
+                            vat_number=conv_buyer_vat or f"FR00{re.sub(r'D','',conv_buyer_siret)[:9]}",
+                            address=_make_addr(conv_buyer_street, conv_buyer_postal, conv_buyer_city),
+                        )
+
+                        invoice_lines_conv = []
+                        for desc, qty, price, vat in conv_lines:
+                            if not desc and not price:
+                                continue
+                            try:
+                                invoice_lines_conv.append(InvoiceLine(
+                                    description=desc or "—",
+                                    quantity=Decimal(qty.replace(",", ".") or "1"),
+                                    unit_price=Decimal(price.replace(",", ".") or "0"),
+                                    vat_rate=Decimal(vat.replace(",", ".") or "20"),
+                                ))
+                            except InvalidOperation:
+                                st.warning(f"⚠️ Ligne ignorée (valeurs numériques invalides) : {desc}")
+
+                        if not invoice_lines_conv:
+                            st.error("❌ Aucune ligne valide — ajoutez au moins une ligne.")
+                        else:
+                            invoice_conv = Invoice(
+                                number=conv_number,
+                                issue_date=conv_issue_date,
+                                due_date=conv_due_date,
+                                seller=seller_conv,
+                                buyer=buyer_conv,
+                                lines=invoice_lines_conv,
+                                currency="EUR",
+                                profile="EN16931",
+                            )
+                            xml_conv = generate_facturx_xml(invoice_conv)
+                            st.success("✅ XML Factur-X CII généré avec succès !")
+
+                            with st.expander("📄 Aperçu XML généré", expanded=True):
+                                st.code("\n".join(xml_conv.split("\n")[:60]), language="xml")
+
+                            st.download_button(
+                                label="⬇️ Télécharger le XML Factur-X",
+                                data=xml_conv.encode("utf-8"),
+                                file_name=f"{conv_number}_facturx.xml",
+                                mime="application/xml",
+                            )
+
+                            # Proposer de valider directement
+                            if st.button("✅ Valider ce XML (aller à l'onglet Validation)", key="conv_to_validate"):
+                                st.session_state["xml_content"] = xml_conv
+                                st.info("XML chargé en session — allez dans l'onglet **Validation** et choisissez 'Facture générée ci-dessus'.")
+
+                    except Exception as e:
+                        st.error(f"❌ Erreur lors de la génération : {e}")
 
 
 # ─────────────────────────────────────────────
