@@ -21,7 +21,109 @@ from lxml import etree
 # ── Chemins par défaut ─────────────────────────────────────
 RULES_PATH    = Path("rules_engine/rules.json")
 SYNONYMS_PATH = Path("mappings/bt_synonyms.json")
+@dataclass
+class ExtractionResult:
+    # Champs mappés (BT-1, BT-2, ...)
+    mapped: dict[str, str] = field(default_factory=dict)
+    lines: list[LineResult] = field(default_factory=list)
+    unmatched_tags: dict[str, tuple[str, str]] = field(default_factory=dict)
+    total_tags:   int = 0
+    matched_tags: int = 0
 
+    @property
+    def match_rate(self) -> float:
+        if self.total_tags == 0:
+            return 0.0
+        return round(self.matched_tags / self.total_tags * 100, 1)
+
+    # ── Propriétés de compatibilité app.py ────────────────
+    @property
+    def invoice_number(self) -> str:
+        return self.mapped.get("BT-1", "")
+
+    @property
+    def issue_date(self) -> str:
+        return self.mapped.get("BT-2", "")
+
+    @property
+    def due_date(self) -> str:
+        return self.mapped.get("BT-9", "")
+
+    @property
+    def type_code(self) -> str:
+        return self.mapped.get("BT-3", "380")
+
+    @property
+    def currency(self) -> str:
+        return self.mapped.get("BT-5", "EUR")
+
+    @property
+    def buyer_ref(self) -> str:
+        return self.mapped.get("BT-10", "")
+
+    @property
+    def contract_ref(self) -> str:
+        return self.mapped.get("BT-12", "")
+
+    @property
+    def purchase_order(self) -> str:
+        return self.mapped.get("BT-13", "")
+
+    @property
+    def notes(self) -> str:
+        return self.mapped.get("BT-22", "")
+
+    @property
+    def seller_name(self) -> str:
+        return self.mapped.get("BT-27", "")
+
+    @property
+    def seller_siret(self) -> str:
+        return self.mapped.get("BT-30", "")
+
+    @property
+    def seller_vat(self) -> str:
+        return self.mapped.get("BT-31", "")
+
+    @property
+    def seller_street(self) -> str:
+        return self.mapped.get("BT-35", "")
+
+    @property
+    def seller_city(self) -> str:
+        return self.mapped.get("BT-37", "")
+
+    @property
+    def seller_postal_code(self) -> str:
+        return self.mapped.get("BT-38", "")
+
+    @property
+    def seller_country(self) -> str:
+        return self.mapped.get("BT-40", "FR")
+
+    @property
+    def seller_iban(self) -> str:
+        return self.mapped.get("BT-84", "")
+
+    @property
+    def seller_bic(self) -> str:
+        return self.mapped.get("BT-86", "")
+
+    @property
+    def buyer_name(self) -> str:
+        return self.mapped.get("BT-44", "")
+
+    @property
+    def buyer_siret(self) -> str:
+        return self.mapped.get("BT-47", "")
+
+    @property
+    def buyer_city(self) -> str:
+        return self.mapped.get("BT-53", "")
+
+    @property
+    def buyer_country(self) -> str:
+        return self.mapped.get("BT-55", "FR")
 
 # ─────────────────────────────────────────────────────────────
 # Normalisation
