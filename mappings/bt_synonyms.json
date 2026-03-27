@@ -1,0 +1,148 @@
+{
+  "_meta": "Synonymes de balises legacy par code BT. Indépendant des règles — le mapping actif est l'intersection avec rules.json.",
+  
+  "BT-1":  {
+    "label": "Numéro de facture",
+    "patterns": ["facturenum","factureid","numfact","nofact","invoicenumber",
+                 "invoiceid","numerofacture","piecenum","nopiece","referencefact"]
+  },
+  "BT-2":  {
+    "label": "Date d'émission",
+    "patterns": ["facturedate","datefact","dateemission","datepiece",
+                 "invoicedate","issuedate","datecreation"]
+  },
+  "BT-3":  {
+    "label": "TypeCode",
+    "patterns": ["facturetype","typefact","typedocument","documenttype",
+                 "invoicetype","typepiece"]
+  },
+  "BT-5":  {
+    "label": "Devise",
+    "patterns": ["devise","currency","monnaie","codecurrency","devisecomptable"]
+  },
+  "BT-9":  {
+    "label": "Date d'échéance",
+    "patterns": ["dtech","dtecheance","echeance","dateecheance","datereglement",
+                 "duedate","datepaiement","delaireglement"]
+  },
+  "BT-10": {
+    "label": "Référence acheteur",
+    "patterns": ["adrcptcli","adressecompteclient","refclient","referenceclient",
+                 "buyerref","codeacheteur","refacheteur","buyerreference"]
+  },
+  "BT-12": {
+    "label": "Référence contrat",
+    "patterns": ["contratnum","nocontrat","refcontrat","contractnum",
+                 "numcontrat","contractreference","referencecontrat"]
+  },
+  "BT-13": {
+    "label": "Bon de commande",
+    "patterns": ["boncde","boncommande","noboncommande","purchaseorder",
+                 "numbc","refbc","orderreference","numcommande"]
+  },
+  "BT-22": {
+    "label": "Note",
+    "patterns": ["comment","comment1","comment2","comment3","codecomment",
+                 "note","remarque","observation","loyer","description"]
+  },
+  "BT-27": {
+    "label": "Nom vendeur",
+    "patterns": ["nomfournisseur","raisonsocialefournisseur","sellername",
+                 "suppliername","nomvendeur","fournisseurnom","vendeur"]
+  },
+  "BT-30": {
+    "label": "SIRET vendeur",
+    "patterns": ["siretfournisseur","siretvendeur","sellersiret","suppliersiret",
+                 "nusiretfournisseur","siret","siren"]
+  },
+  "BT-31": {
+    "label": "TVA vendeur",
+    "patterns": ["tvafournisseur","numtvafournisseur","sellervatid","vatidseller",
+                 "taxidvendeur","tvavendeur","numtva","numintracom"]
+  },
+  "BT-35": {
+    "label": "Rue vendeur",
+    "patterns": ["adrfournisseur","ruefournisseur","adressefournisseur",
+                 "sellerstreet","ligneadresse1fournisseur","voiefournisseur"]
+  },
+  "BT-37": {
+    "label": "Ville vendeur",
+    "patterns": ["villefournisseur","communefournisseur","sellercity",
+                 "cityfournisseur","localite"]
+  },
+  "BT-38": {
+    "label": "Code postal vendeur",
+    "patterns": ["cpfournisseur","codepostalfournisseur","sellerpostalcode",
+                 "postalcodefournisseur","zipfournisseur"]
+  },
+  "BT-40": {
+    "label": "Pays vendeur",
+    "patterns": ["paysfournisseur","countryfournisseur","sellercountry",
+                 "copayfournisseur","copays"]
+  },
+  "BT-44": {
+    "label": "Nom acheteur",
+    "patterns": ["nomclient","raisonsocialeclient","buyername","customername",
+                 "nomacheteur","clientnom","acheteur","societe"]
+  },
+  "BT-47": {
+    "label": "SIRET acheteur",
+    "patterns": ["siretclient","siretacheteur","buyersiret","customersiret",
+                 "nusiretclient","siretdest"]
+  },
+  "BT-49": {
+    "label": "Identifiant électronique acheteur",
+    "patterns": ["emailclient","electronicaddressclient","buyereladdress",
+                 "adresseelectroniqueclient"]
+  },
+  "BT-53": {
+    "label": "Ville acheteur",
+    "patterns": ["villeclient","communeclient","buyercity","cityclient"]
+  },
+  "BT-55": {
+    "label": "Pays acheteur",
+    "patterns": ["paysclient","countryclient","buyercountry","copaysdest"]
+  },
+  "BT-84": {
+    "label": "IBAN vendeur",
+    "patterns": ["iban","ibanfournisseur","ibanvendeur","selleriban",
+                 "comptebancaire","ribiban","rib"]
+  },
+  "BT-86": {
+    "label": "BIC vendeur",
+    "patterns": ["bic","swift","bicfournisseur","bicvendeur","sellerswift"]
+  },
+  "BT-126": {
+    "label": "Numéro de ligne",
+    "patterns": ["ligneid","linenum","numeroligne","lineid","lineidentifier",
+                 "noligne","idligne"]
+  },
+  "BT-129": {
+    "label": "Quantité",
+    "patterns": ["quantite","quantity","qte","qty","volume","nombre"]
+  },
+  "BT-130": {
+    "label": "Unité de mesure",
+    "patterns": ["unite","unit","unitdemesure","uom","mesure"]
+  },
+  "BT-131": {
+    "label": "Montant net ligne",
+    "patterns": ["montantligne","linetotal","montantnet","netamount",
+                 "totalline","montanthtligne"]
+  },
+  "BT-146": {
+    "label": "Prix unitaire HT",
+    "patterns": ["prixunitaire","unitprice","prixht","priceunit","tarifligne",
+                 "prixunit","tarif"]
+  },
+  "BT-151": {
+    "label": "Code TVA ligne",
+    "patterns": ["tvaligne","vatrateligne","codetvaligne","tauxtvalgne",
+                 "tvacode","taxcode"]
+  },
+  "BT-153": {
+    "label": "Désignation article",
+    "patterns": ["designation","description","libelle","articlename","productname",
+                 "nomservice","nomprestation","libelleligne","objet"]
+  }
+}

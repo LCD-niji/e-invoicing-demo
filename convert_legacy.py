@@ -476,3 +476,98 @@ def make_sample_legacy_xml() -> str:
   <Commentaire>Facture relative au projet de dématérialisation 2026</Commentaire>
 </Facture>
 """
+import json
+import re
+from pathlib import Path
+
+
+def _normalize(tag: str) -> str:
+    """Normalise un nom de balise : minuscules, sans séparateurs."""
+    return re.sub(r"[^a-z0-9]", "", tag.lower())
+
+
+def build_field_map(
+    rules_path: str = "rules_engine/rules.json",
+    synonyms_path: str = "mappings/bt_synonyms.json",
+) -> dict[str, dict]:
+    """
+    Génère le mapping legacy → CII à partir des règles actives (f1:true)
+    et du fichier de synonymes.
+
+    Retourne un dict :
+    {
+      "normalized_pattern": {
+        "bt": "BT-1",
+        "label": "Numéro de facture",
+        "score_bonus": 0
+      },
+      ...
+    }
+    """
+    # 1. Charger les BT actifs depuis rules.json (f1:true uniquement)
+    with open(rules_path, encoding="utf-8") as f:
+        rules_data = json.load(f)
+
+    active_bts: set[str] = set()
+    for key, rules in rules_data.items():
+        if key == "meta" or not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if rule.get("f1") is True:
+                for bt in rule.get("bt", "").split(","):
+                    active_bts.add(bt.strip())
+
+    # 2. Charger les synonymes
+    with open(synonyms_path, encoding="utf-8") as f:
+        synonyms_data = json.load(f)
+
+    # 3. Construire le mapping — uniquement les BT actifs dans les règles
+    field_map: dict[str, dict] = {}
+    for bt_code, meta in synonyms_data.items():
+        if bt_code.startswith("_"):
+            continue
+        if bt_code not in active_bts:
+            continue  # BT non utilisé dans les règles actives → ignoré
+        label    = meta.get("label", bt_code)
+        patterns = meta.get("patterns", [])
+        for pattern in patterns:
+            key = _normalize(pattern)
+            if key not in field_map:
+                field_map[key] = {"bt": bt_code, "label": label}
+
+    return field_map
+
+
+def get_active_bt_list(
+    rules_path: str = "rules_engine/rules.json",
+    synonyms_path: str = "mappings/bt_synonyms.json",
+) -> list[dict]:
+    """
+    Retourne la liste des BT actifs avec leurs labels,
+    pour alimenter le selectbox de mapping manuel dans l'UI.
+    """
+    with open(synonyms_path, encoding="utf-8") as f:
+        synonyms_data = json.load(f)
+
+    with open(rules_path, encoding="utf-8") as f:
+        rules_data = json.load(f)
+
+    active_bts: set[str] = set()
+    for key, rules in rules_data.items():
+        if key == "meta" or not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if rule.get("f1") is True:
+                for bt in rule.get("bt", "").split(","):
+                    active_bts.add(bt.strip())
+
+    return [
+        {"bt": bt, "label": meta.get("label", bt)}
+        for bt, meta in synonyms_data.items()
+        if not bt.startswith("_") and bt in active_bts
+    ]mkdir -p mappings
+# Créer mappings/bt_synonyms.json
+# Mettre à jour convert_legacy.py (build_field_map + get_active_bt_list)
+git add mappings/bt_synonyms.json convert_legacy.py
+git commit -m "feat: mapping dynamique BT ← rules.json + bt_synonyms.json"
+git push
