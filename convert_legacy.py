@@ -124,6 +124,28 @@ class ExtractionResult:
     @property
     def buyer_country(self) -> str:
         return self.mapped.get("BT-55", "FR")
+    
+    @property
+    def seller_postal(self) -> str:
+        """Alias de seller_postal_code pour compatibilité app.py"""
+        return self.mapped.get("BT-38", "")
+
+    @property
+    def buyer_vat(self) -> str:
+        return self.mapped.get("BT-48", "")
+
+    @property
+    def buyer_street(self) -> str:
+        return self.mapped.get("BT-50", "")
+
+    @property
+    def buyer_postal(self) -> str:
+        return self.mapped.get("BT-53", "")
+
+    @property
+    def matched_fields(self) -> dict:
+        """Retourne le dict des BT mappés — pour affichage dans app.py"""
+        return self.mapped
 
 # ─────────────────────────────────────────────────────────────
 # Normalisation

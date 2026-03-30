@@ -1,20 +1,25 @@
 # ═══════════════════════════════════════════
 # CONFIGURATION & IMPORTS
 # ═══════════════════════════════════════════
-
+import re
+import time
+from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 import streamlit as st
 import datetime
 import json
-from decimal import Decimal
 from pathlib import Path
 
-from generate_invoice    import Invoice, InvoiceLine, Party, Address, PROFILES
+from generate_invoice    import Invoice, InvoiceLine, Party, Address, PROFILES, generate_facturx_xml
 from generate_invoice_ubl import generate_ubl_xml
 from generate_pdf        import render_invoice_pdf
 from generate_facturx    import build_facturx, extract_xml_from_facturx
 from schematron_validator import validate_en16931, detect_syntax
 from rules_engine.ai_validator import AiValidator
 from convert_legacy      import extract_from_xml, make_sample_legacy_xml, ExtractionResult
+from send_chorus         import simulate_submission, simulate_status_progression, CHORUS_STATUS
+
+
 
 # ── Page config ───────────────────────────────────────────
 st.set_page_config(
@@ -38,66 +43,10 @@ st.caption(
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📝 Générer une facture",
     "✅ Valider",
-    "🔄 Conversion XML Legacy",
     "📡 Dépôt Chorus Pro",
-    "ℹ️ À propos",
+    "🔄 Suivi Chorus Pro",
+    "🔄 Conversion XML Legacy",
 ])
-
-# ═══════════════════════════════════════════
-# TAB 1 — Génération
-# ═══════════════════════════════════════════
-
-with tab1:
-    # ... tout le code Tab 1 ...
-
-# ═══════════════════════════════════════════
-# TAB 2 — Validation
-# ═══════════════════════════════════════════
-
-with tab2:
-    # ... tout le code Tab 2 ...
-
-# ═══════════════════════════════════════════
-# TAB 3 — Conversion Legacy
-# ═══════════════════════════════════════════
-
-with tab3:
-    # ... tout le code Tab 3 ...
-
-# ═══════════════════════════════════════════
-# TAB 4 — Chorus Pro
-# ═══════════════════════════════════════════
-
-with tab4:
-    # ... tout le code Tab 4 ...
-
-# ═══════════════════════════════════════════
-# TAB 5 — À propos
-# ═══════════════════════════════════════════
-
-with tab5:
-    st.markdown("""
-    ### 🧾 Démo Facturation Électronique 2026
-
-    Outil pédagogique Niji illustrant la mise en conformité à la réforme française
-    de facturation électronique obligatoire à partir de **2026**.
-
-    #### Formats supportés
-    | Format | Syntaxe | Réseau |
-    |---|---|---|
-    | **Factur-X** | PDF/A-3b + CII embarqué | B2B France, Chorus Pro |
-    | **CII** | UN/CEFACT D22B | Interopérabilité EU |
-    | **UBL 2.1** | OASIS BIS Billing 3.0 | Peppol, ERPs internationaux |
-
-    #### Référentiels de validation
-    - **EN16931** : Norme européenne CEN/TC 434 v1.3.15
-    - **Annexe 7 DGFiP v1.8** : 235 règles de gestion françaises (31/10/2025)
-
-    #### Liens
-    - [GitHub](https://github.com/LCD-niji/e-invoicing-demo)
-    - [Schematron CEN](https://github.com/ConnectingEurope/eInvoicing-EN16931)
-    - [DGFiP — Annexe 7](https://www.impots.gouv.fr)
-    """)
 
 # ═══════════════════════════════════════════
 # TAB 1 — Génération
@@ -211,8 +160,6 @@ with tab1:
     # ── Bouton génération ─────────────────────────────────
     if st.button("🔧 Générer la facture", type="primary", use_container_width=True):
         try:
-            from decimal import Decimal
-
             invoice = Invoice(
                 number=invoice_number,
                 issue_date=issue_date,
@@ -258,7 +205,6 @@ with tab1:
 
             # ── CII pur ────────────────────────────────────
             elif "CII pur" in syntax:
-                from generate_invoice import generate_facturx_xml
                 xml_content = generate_facturx_xml(invoice)
                 st.session_state["xml_content"] = xml_content
                 st.session_state["xml_syntax"]  = "CII"
@@ -271,9 +217,8 @@ with tab1:
                     mime="application/xml",
                 )
 
-            # ── Factur-X PDF/A-3b ──────────────────────────
+            # ── Factur-X (CII + PDF à générer séparément) ─
             else:
-                from generate_invoice import generate_facturx_xml
                 xml_content = generate_facturx_xml(invoice)
                 st.session_state["xml_content"] = xml_content
                 st.session_state["xml_syntax"]  = "CII"
@@ -286,23 +231,31 @@ with tab1:
                     mime="application/xml",
                 )
 
-                # Bouton PDF séparé (génération lourde)
-                if st.button("📄 Générer le Factur-X complet (PDF/A-3b)",
-                             use_container_width=True):
-                    with st.spinner("Génération PDF/A-3b en cours..."):
-                        fx_bytes = build_facturx(invoice, xml_content)
-                    st.download_button(
-                        label="⬇️ Télécharger Factur-X (.pdf)",
-                        data=fx_bytes,
-                        file_name=f"{invoice_number}_facturx.pdf",
-                        mime="application/pdf",
-                    )
-
         except Exception as e:
             st.error(f"❌ Erreur génération : {e}")
             import traceback
             st.code(traceback.format_exc())
 
+    # ── Bouton PDF — HORS du bouton génération ────────────
+    # (Streamlit interdit les boutons imbriqués)
+    if (
+        st.session_state.get("xml_syntax") == "CII"
+        and "invoice_obj" in st.session_state
+        and "Factur-X" in syntax
+    ):
+        if st.button("📄 Générer le Factur-X complet (PDF/A-3b)",
+                     use_container_width=True):
+            with st.spinner("Génération PDF/A-3b en cours..."):
+                fx_bytes = build_facturx(
+                    st.session_state["invoice_obj"],
+                    st.session_state["xml_content"]
+                )
+            st.download_button(
+                label="⬇️ Télécharger Factur-X (.pdf)",
+                data=fx_bytes,
+                file_name=f"{st.session_state['invoice_obj'].number}_facturx.pdf",
+                mime="application/pdf",
+            )
 
 # ═══════════════════════════════════════════
 # TAB 2 — Validation
