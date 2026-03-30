@@ -81,6 +81,8 @@ class Invoice:
     currency: str = "EUR"
     profile: str = "EN16931"
     notes: Optional[str] = None
+    contract_ref: Optional[str] = None    
+    purchase_order: Optional[str] = None   
 
     # Calculés automatiquement
     @property

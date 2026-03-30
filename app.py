@@ -102,15 +102,17 @@ with tab1:
 
     # ── Formulaire acheteur ───────────────────────────────
     st.markdown("#### 🏭 Acheteur")
+    # Formulaire acheteur
     col3, col4 = st.columns(2)
     with col3:
-        buyer_name    = st.text_input("Raison sociale",   "Dupont Industries SARL",
-                                      key="buyer_name")
-        buyer_siret   = st.text_input("SIRET",            "98765432109876",
-                                      key="buyer_siret")
+        buyer_name    = st.text_input("Raison sociale",  "Dupont Industries SARL", key="buyer_name")
+        buyer_siret   = st.text_input("SIRET",           "98765432109876",          key="buyer_siret")
+        buyer_vat     = st.text_input("N° TVA",          "FR98765432109",           key="buyer_vat")  # ← AJOUT
+        buyer_street  = st.text_input("Rue",             "5 avenue de la Gare",     key="buyer_street")
     with col4:
-        buyer_city    = st.text_input("Ville",            "Lyon",  key="buyer_city")
-        buyer_country = st.text_input("Pays (ISO)",       "FR",    key="buyer_country")
+        buyer_zip     = st.text_input("Code postal",     "69001",                   key="buyer_zip")
+        buyer_city    = st.text_input("Ville",           "Lyon",                    key="buyer_city")
+        buyer_country = st.text_input("Pays (ISO)",      "FR",                      key="buyer_country")
 
     st.divider()
 
@@ -178,10 +180,14 @@ with tab1:
                     ),
                 ),
                 buyer=Party(
-                    name=buyer_name, siret=buyer_siret,
+                    name=buyer_name,
+                    siret=buyer_siret,
+                    vat_number=buyer_vat,     # ← AJOUT
                     address=Address(
+                        street=buyer_street,
                         city=buyer_city,
-                        country_code=buyer_country,   # ← country → country_code
+                        postal_code=buyer_zip,
+                        country_code=buyer_country,
                     ),
                 ),
                 lines=[
