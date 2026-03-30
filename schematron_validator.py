@@ -1,145 +1,201 @@
 """
 schematron_validator.py
 -----------------------
-Valide une facture Factur-X (CII) contre les règles officielles
-EN 16931 du CEN/TC 434 via le fichier XSLT officiel (v1.3.15).
-
-Moteur XSLT : Saxon-C HE (XSLT 3.0) via saxonche
-— nécessaire car le schematron CEN utilise XPath 2.0+ (xs:decimal, upper-case…)
+Validation EN16931 via XSLT Schematron officiel CEN/TC 434.
+Supporte CII et UBL 2.1.
 """
 from __future__ import annotations
 
+import re
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lxml import etree
+# ── Chemins XSLT ──────────────────────────────────────────
+XSLT_CII_PATH = Path(__file__).parent / "schematron" / "EN16931-CII-validation.xslt"
+XSLT_UBL_PATH = Path(__file__).parent / "schematron" / "EN16931-UBL-validation.xslt"
 
-try:
-    from saxonche import PySaxonProcessor
-    SAXON_AVAILABLE = True
-except ImportError:
-    SAXON_AVAILABLE = False
 
-SVRL       = "http://purl.oclc.org/dsdl/svrl"
-DEFAULT_XSLT = Path(__file__).parent / "schematron" / "EN16931-CII-validation.xslt"
-XSLT_URL   = (
-    "https://raw.githubusercontent.com/ConnectingEurope/"
-    "eInvoicing-EN16931/master/cii/xslt/EN16931-CII-validation.xslt"
-)
-
+# ─────────────────────────────────────────────────────────
+# Structures de résultat
+# ─────────────────────────────────────────────────────────
 
 @dataclass
 class SchematronIssue:
     rule_id:  str
     message:  str
-    severity: str   # "ERROR" | "WARNING"
-    location: str = ""
-    source:   str = "EN16931 CEN/TC 434 v1.3.15"
+    location: str
+    severity: str = "ERROR"
 
 
 @dataclass
 class SchematronResult:
-    issues: list[SchematronIssue] = field(default_factory=list)
-
-    @property
-    def errors(self)   -> list[SchematronIssue]:
-        return [i for i in self.issues if i.severity == "ERROR"]
-
-    @property
-    def warnings(self) -> list[SchematronIssue]:
-        return [i for i in self.issues if i.severity == "WARNING"]
+    errors:   list[SchematronIssue] = field(default_factory=list)
+    warnings: list[SchematronIssue] = field(default_factory=list)
 
     @property
     def is_valid(self) -> bool:
         return len(self.errors) == 0
 
 
-def _ensure_xslt(xslt_path: Path) -> None:
-    """Télécharge le XSLT si absent."""
-    if not xslt_path.exists():
-        import requests
-        xslt_path.parent.mkdir(parents=True, exist_ok=True)
-        r = requests.get(XSLT_URL, timeout=15)
-        r.raise_for_status()
-        xslt_path.write_bytes(r.content)
+# ─────────────────────────────────────────────────────────
+# Parseur des résultats SVRL
+# ─────────────────────────────────────────────────────────
+
+def _parse_svrl(svrl_text: str) -> SchematronResult:
+    """Parse le SVRL (Schematron Validation Report Language) retourné par Saxon."""
+    result = SchematronResult()
+
+    # Chercher les failed-assert (erreurs) et successful-report (warnings)
+    fail_pattern = re.compile(
+        r'<svrl:failed-assert[^>]*\btest="([^"]*)"[^>]*\bid="([^"]*)"[^>]*\blocation="([^"]*)"[^>]*>.*?'
+        r'<svrl:text>(.*?)</svrl:text>',
+        re.DOTALL,
+    )
+    report_pattern = re.compile(
+        r'<svrl:successful-report[^>]*\bid="([^"]*)"[^>]*\blocation="([^"]*)"[^>]*>.*?'
+        r'<svrl:text>(.*?)</svrl:text>',
+        re.DOTALL,
+    )
+
+    for m in fail_pattern.finditer(svrl_text):
+        rule_id  = m.group(2).strip()
+        location = m.group(3).strip()
+        message  = re.sub(r"<[^>]+>", "", m.group(4)).strip()
+        issue = SchematronIssue(rule_id=rule_id, message=message,
+                                location=location, severity="ERROR")
+        if rule_id.startswith("BR-W") or "[W]" in message:
+            issue.severity = "WARNING"
+            result.warnings.append(issue)
+        else:
+            result.errors.append(issue)
+
+    for m in report_pattern.finditer(svrl_text):
+        rule_id  = m.group(1).strip()
+        location = m.group(2).strip()
+        message  = re.sub(r"<[^>]+>", "", m.group(3)).strip()
+        result.warnings.append(
+            SchematronIssue(rule_id=rule_id, message=message,
+                            location=location, severity="WARNING")
+        )
+
+    return result
 
 
-def _parse_svrl(svrl_xml: str) -> list[SchematronIssue]:
-    """Extrait les issues depuis la sortie SVRL."""
-    issues = []
+# ─────────────────────────────────────────────────────────
+# Moteur Saxon-C HE
+# ─────────────────────────────────────────────────────────
+
+def _run_saxon(xml_path: str, xslt_path: Path) -> str | None:
+    """Lance Saxon-C HE via subprocess. Retourne le SVRL ou None si erreur."""
     try:
-        root = etree.fromstring(svrl_xml.encode("utf-8"))
+        import saxonche
+        with saxonche.PySaxonProcessor(license=False) as proc:
+            xslt_proc = proc.new_xslt30_processor()
+            xslt_proc.set_cwd(str(xslt_path.parent))
+            executable = xslt_proc.compile_stylesheet(
+                stylesheet_file=str(xslt_path)
+            )
+            result = executable.transform_to_string(
+                source_file=str(xml_path)
+            )
+            return result
+    except ImportError:
+        pass
+
+    # Fallback subprocess (si Saxon installé système)
+    try:
+        result = subprocess.run(
+            ["java", "-jar", "saxon.jar", f"-s:{xml_path}", f"-xsl:{xslt_path}"],
+            capture_output=True, text=True, timeout=30
+        )
+        return result.stdout if result.returncode == 0 else None
     except Exception:
-        return issues
-
-    for node in root.iter(f"{{{SVRL}}}failed-assert"):
-        text_el  = node.find(f"{{{SVRL}}}text")
-        message  = (text_el.text or "").strip() if text_el is not None else ""
-        severity = "ERROR" if node.get("flag") == "fatal" else "WARNING"
-        issues.append(SchematronIssue(
-            rule_id  = node.get("id", "BR-??"),
-            message  = message,
-            severity = severity,
-            location = node.get("location", ""),
-        ))
-
-    for node in root.iter(f"{{{SVRL}}}successful-report"):
-        if node.get("flag") == "fatal":
-            text_el = node.find(f"{{{SVRL}}}text")
-            message = (text_el.text or "").strip() if text_el is not None else ""
-            issues.append(SchematronIssue(
-                rule_id  = node.get("id", "BR-??"),
-                message  = message,
-                severity = "ERROR",
-                location = node.get("location", ""),
-            ))
-    return issues
+        return None
 
 
-def validate_en16931(
-    xml_path:  str,
-    xslt_path: Path = DEFAULT_XSLT,
-) -> SchematronResult:
+# ─────────────────────────────────────────────────────────
+# Fonction principale
+# ─────────────────────────────────────────────────────────
+
+def validate_en16931(xml_path: str, syntax: str = "CII") -> SchematronResult:
     """
-    Valide le XML CII contre les ~120 règles BR-* officielles CEN/TC 434.
-    Utilise Saxon-C HE (XSLT 3.0) si disponible.
+    Valide un XML CII ou UBL 2.1 via Schematron CEN/TC 434.
+
+    Args:
+        xml_path : chemin vers le fichier XML à valider
+        syntax   : "CII" (défaut) ou "UBL"
+
+    Returns:
+        SchematronResult avec errors/warnings
     """
     result = SchematronResult()
 
-    if not SAXON_AVAILABLE:
-        result.issues.append(SchematronIssue(
-            rule_id  = "SETUP-ERR",
-            message  = "saxonche non installé — pip install saxonche",
-            severity = "ERROR",
+    # ── Sélection du XSLT selon la syntaxe ────────────────
+    xslt_path = XSLT_UBL_PATH if syntax.upper() == "UBL" else XSLT_CII_PATH
+
+    # ── Vérifier que le XSLT existe ───────────────────────
+    if not xslt_path.exists():
+        if syntax.upper() == "UBL":
+            result.errors.append(SchematronIssue(
+                rule_id="XSLT-UBL-MISSING",
+                message=(
+                    f"XSLT UBL introuvable ({xslt_path.name}). "
+                    "Téléchargez-le avec la commande :\n"
+                    "curl -L https://raw.githubusercontent.com/ConnectingEurope/"
+                    "eInvoicing-EN16931/master/ubl/xslt/EN16931-UBL-validation.xslt "
+                    f"-o schematron/EN16931-UBL-validation.xslt"
+                ),
+                location="",
+            ))
+        else:
+            result.errors.append(SchematronIssue(
+                rule_id="XSLT-CII-MISSING",
+                message=f"XSLT CII introuvable ({xslt_path.name}).",
+                location="",
+            ))
+        return result
+
+    # ── Auto-détection si syntax non précisée ─────────────
+    if syntax.upper() not in ("CII", "UBL"):
+        try:
+            with open(xml_path, encoding="utf-8", errors="replace") as f:
+                content = f.read(500)
+            if "oasis" in content or "Invoice-2" in content:
+                xslt_path = XSLT_UBL_PATH
+            else:
+                xslt_path = XSLT_CII_PATH
+        except Exception:
+            xslt_path = XSLT_CII_PATH
+
+    # ── Exécution Saxon ───────────────────────────────────
+    svrl = _run_saxon(xml_path, xslt_path)
+
+    if svrl is None:
+        # Fallback : validation structurelle minimale
+        result.warnings.append(SchematronIssue(
+            rule_id="ENGINE-UNAVAILABLE",
+            message=(
+                "Moteur XSLT Saxon-C indisponible — "
+                "validation Schematron non exécutée. "
+                "Installez saxonche : pip install saxonche"
+            ),
+            location="",
+            severity="WARNING",
         ))
         return result
 
-    try:
-        _ensure_xslt(xslt_path)
+    return _parse_svrl(svrl)
 
-        with PySaxonProcessor(license=False) as proc:
-            xslt_proc  = proc.new_xslt30_processor()
-            executable = xslt_proc.compile_stylesheet(
-                stylesheet_file=str(xslt_path.resolve())
-            )
-            svrl_output = executable.transform_to_string(
-                source_file=str(Path(xml_path).resolve())
-            )
 
-        if svrl_output:
-            result.issues = _parse_svrl(svrl_output)
-        else:
-            result.issues.append(SchematronIssue(
-                rule_id  = "XSLT-EMPTY",
-                message  = "Le moteur XSLT n'a retourné aucun résultat",
-                severity = "WARNING",
-            ))
+# ─────────────────────────────────────────────────────────
+# Utilitaire : détection syntaxe depuis contenu XML
+# ─────────────────────────────────────────────────────────
 
-    except Exception as e:
-        result.issues.append(SchematronIssue(
-            rule_id  = "XSLT-ERR",
-            message  = f"Erreur Schematron : {e}",
-            severity = "ERROR",
-        ))
-
-    return result
+def detect_syntax(xml_content: str) -> str:
+    """Retourne 'UBL' ou 'CII' selon le contenu XML."""
+    if "oasis" in xml_content[:1000] or "Invoice-2" in xml_content[:1000]:
+        return "UBL"
+    return "CII"

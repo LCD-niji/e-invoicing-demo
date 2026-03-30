@@ -1,349 +1,260 @@
-"""
-aapp.py
-------
-Dashboard Streamlit — Démo facturation électronique 2026
-
-Fonctionnalités :
-  ✅ Formulaire de saisie de facture
-  ✅ Génération XML Factur-X (EN 16931)
-  ✅ Génération PDF/A-3b Factur-X complet
-  ✅ Validation avec affichage des erreurs/warnings
-  ✅ Conversion XML CII → Factur-X PDF
-  ✅ Simulation dépôt Chorus Pro
-  ✅ Suivi de statut en temps réel
-
-Lancement :
-    streamlit run app.py
-"""
-
-import re
-import sys
-import time
-import uuid
-from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
-from pathlib import Path
-
-from schematron_validator import validate_en16931, SchematronResult
-from rules_engine.ai_validator import AiValidator, AiResult
-from convert_legacy import extract_from_xml, make_sample_legacy_xml, ExtractionResult
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# ═══════════════════════════════════════════
+# IMPORTS (en haut de app.py)
+# ═══════════════════════════════════════════
 
 import streamlit as st
-
-from generate_invoice import (
-    Address, Invoice, InvoiceLine, Party,
-    generate_facturx_xml, PROFILES
-)
+from pathlib import Path
+from generate_invoice import Invoice, InvoiceLine, Party, Address, PROFILES
+from generate_invoice_ubl import generate_ubl_xml
 from generate_pdf import render_invoice_pdf
-from generate_facturx import build_facturx, build_facturx_from_xml
+from generate_facturx import build_facturx, extract_xml_from_facturx
 from validate_invoice import InvoiceValidator
-from send_chorus import simulate_submission, simulate_status_progression, CHORUS_STATUS
-from generate_facturx import build_facturx, build_facturx_from_xml, extract_xml_from_facturx
-
-import facturx
-st.caption(f"facturx version : {facturx.__version__} — attrs : {[a for a in dir(facturx) if not a.startswith('_')]}")
-
-# ─────────────────────────────────────────────
-# Configuration Streamlit
-# ─────────────────────────────────────────────
-
-st.set_page_config(
-    page_title="Démo Facturation Électronique 2026",
-    page_icon="🧾",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st.markdown("""
-<style>
-    .main-header {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        padding: 2rem;
-        border-radius: 12px;
-        margin-bottom: 2rem;
-        color: white;
-        text-align: center;
-    }
-    .status-badge {
-        padding: 0.3rem 0.8rem;
-        border-radius: 20px;
-        font-weight: bold;
-        font-size: 0.85rem;
-    }
-    .badge-valid   { background: #d4edda; color: #155724; }
-    .badge-invalid { background: #f8d7da; color: #721c24; }
-    .badge-warn    { background: #fff3cd; color: #856404; }
-    .metric-card {
-        background: #f8f9fa;
-        border-left: 4px solid #0f3460;
-        padding: 1rem;
-        border-radius: 4px;
-        margin: 0.5rem 0;
-    }
-    .chorus-step {
-        background: #e8f4f8;
-        border-radius: 8px;
-        padding: 0.8rem;
-        margin: 0.4rem 0;
-        border-left: 3px solid #17a2b8;
-    }
-    .rule-error   { border-left-color: #dc3545 !important; background: #fdf2f3; }
-    .rule-warning { border-left-color: #ffc107 !important; background: #fffdf0; }
-    .rule-info    { border-left-color: #28a745 !important; background: #f2fdf5; }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ─────────────────────────────────────────────
-# En-tête
-# ─────────────────────────────────────────────
-
-st.markdown("""
-<div class="main-header">
-    <h1>🧾 Facturation Électronique 2026</h1>
-    <p style="opacity:0.8; margin:0">
-        Démo technique — Génération Factur-X · Validation EN 16931 · Dépôt Chorus Pro
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ─────────────────────────────────────────────
-# Sidebar
-# ─────────────────────────────────────────────
-
-with st.sidebar:
-    st.header("⚙️ Paramètres")
-
-    profile = st.selectbox(
-        "Profil Factur-X",
-        options=list(PROFILES.keys()),
-        index=3,
-        help="EN16931 est recommandé pour les PME"
-    )
-
-    st.divider()
-    st.markdown("**📋 À propos de cette démo**")
-    st.markdown("""
-Cette démo illustre une implémentation complète de la **réforme facturation électronique 2026** :
-
-- ✅ Norme **Factur-X** (PDF/A-3 + XML CII)
-- ✅ Règles **EN 16931** (norme européenne)
-- ✅ Intégration **Chorus Pro** (API PISTE)
-- ✅ Validations **DGFiP** spécifiques FR
-
----
-🔗 [LinkedIn](#) · [GitHub](#) · [Me contacter](#)
-    """)
-
-    st.divider()
-    st.info("💡 **Réforme 2026** : toutes les PME françaises devront émettre des factures électroniques à partir du 1er septembre 2026.")
-
-
-# ─────────────────────────────────────────────
-# Tabs
-# ─────────────────────────────────────────────
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📝 Saisie facture",
-    "✅ Validation",
-    "🚀 Dépôt Chorus Pro",
-    "📊 Statut & Suivi",
-    "🔄 Conversion XML Legacy",
-])
+from schematron_validator import validate_en16931, detect_syntax, SchematronResult
+from rules_engine.ai_validator import AiValidator
+from convert_legacy import extract_from_xml, make_sample_legacy_xml, ExtractionResult
 
 
 # ═══════════════════════════════════════════
-# TAB 1 — Saisie de la facture
+# TAB 1 — Génération
 # ═══════════════════════════════════════════
 
 with tab1:
-    st.subheader("Informations de la facture")
+    st.subheader("Génération d'une facture électronique")
 
-    col1, col2, col3 = st.columns([2, 2, 1])
+    # ── Sélecteur syntaxe + profil ────────────────────────
+    col_syntax, col_profile = st.columns(2)
+    with col_syntax:
+        syntax = st.radio(
+            "Syntaxe de sortie",
+            ["Factur-X (PDF/A-3b + CII)", "CII pur (.xml)", "UBL 2.1 (.xml)"],
+            horizontal=False,
+            help=(
+                "**Factur-X** : PDF lisible + XML CII embarqué — format privilégié B2B France\n\n"
+                "**CII** : XML UN/CEFACT pur — interopérabilité maximale\n\n"
+                "**UBL 2.1** : XML OASIS — requis pour les échanges Peppol "
+                "et les ERPs internationaux (SAP Ariba, Oracle, Basware)"
+            )
+        )
+    with col_profile:
+        if "UBL" not in syntax:
+            profile = st.selectbox(
+                "Profil Factur-X",
+                list(PROFILES.keys()),
+                index=3,
+                help="EN16931 est le profil recommandé pour la réforme 2026"
+            )
+        else:
+            profile = "EN16931"
+            st.info("ℹ️ UBL 2.1 utilise le profil **Peppol BIS Billing 3.0** "
+                    "(équivalent EN16931)")
+
+    st.divider()
+
+    # ── Formulaire vendeur ────────────────────────────────
+    st.markdown("#### 🏢 Vendeur")
+    col1, col2 = st.columns(2)
     with col1:
-        invoice_number = st.text_input("Numéro de facture",
-                                        value=f"FAC-2026-{uuid.uuid4().hex[:6].upper()}")
+        seller_name   = st.text_input("Raison sociale",   "Acme Conseil SAS")
+        seller_siret  = st.text_input("SIRET",            "12345678901234")
+        seller_vat    = st.text_input("N° TVA",           "FR12345678901")
+        seller_iban   = st.text_input("IBAN",             "FR7630006000011234567890189")
+        seller_bic    = st.text_input("BIC",              "BNPAFRPP")
     with col2:
-        issue_date = st.date_input("Date d'émission", value=date.today())
+        seller_street = st.text_input("Rue",              "12 rue de la Paix")
+        seller_city   = st.text_input("Ville",            "Paris")
+        seller_zip    = st.text_input("Code postal",      "75001")
+        seller_country= st.text_input("Pays (ISO)",       "FR")
+
+    st.divider()
+
+    # ── Formulaire acheteur ───────────────────────────────
+    st.markdown("#### 🏭 Acheteur")
+    col3, col4 = st.columns(2)
     with col3:
-        due_days = st.number_input("Délai paiement (jours)", value=30, min_value=0, max_value=365)
+        buyer_name    = st.text_input("Raison sociale",   "Dupont Industries SARL",
+                                      key="buyer_name")
+        buyer_siret   = st.text_input("SIRET",            "98765432109876",
+                                      key="buyer_siret")
+    with col4:
+        buyer_city    = st.text_input("Ville",            "Lyon",  key="buyer_city")
+        buyer_country = st.text_input("Pays (ISO)",       "FR",    key="buyer_country")
 
     st.divider()
-    col_sell, col_buy = st.columns(2)
 
-    with col_sell:
-        st.markdown("#### 🏢 Vendeur (Fournisseur)")
-        seller_name    = st.text_input("Raison sociale", value="Acme Conseil SAS", key="s_name")
-        seller_siret   = st.text_input("SIRET (14 chiffres)", value="12345678901234", key="s_siret")
-        seller_vat     = st.text_input("N° TVA intra", value="FR12345678901", key="s_vat")
-        seller_street  = st.text_input("Adresse", value="12 rue de la Paix", key="s_street")
-        col_s1, col_s2 = st.columns([1, 2])
-        with col_s1:
-            seller_cp   = st.text_input("CP", value="75001", key="s_cp")
-        with col_s2:
-            seller_city = st.text_input("Ville", value="Paris", key="s_city")
-        seller_iban    = st.text_input("IBAN (virement SEPA)", value="FR7630006000011234567890189", key="s_iban")
-
-    with col_buy:
-        st.markdown("#### 🏪 Acheteur (Client)")
-        buyer_name    = st.text_input("Raison sociale", value="Dupont & Fils SARL", key="b_name")
-        buyer_siret   = st.text_input("SIRET (14 chiffres)", value="98765432109876", key="b_siret")
-        buyer_vat     = st.text_input("N° TVA intra", value="FR98765432109", key="b_vat")
-        buyer_street  = st.text_input("Adresse", value="5 avenue des Champs", key="b_street")
-        col_b1, col_b2 = st.columns([1, 2])
-        with col_b1:
-            buyer_cp   = st.text_input("CP", value="69001", key="b_cp")
-        with col_b2:
-            buyer_city = st.text_input("Ville", value="Lyon", key="b_city")
+    # ── Entête facture ────────────────────────────────────
+    st.markdown("#### 📋 Entête")
+    col5, col6, col7 = st.columns(3)
+    with col5:
+        invoice_number = st.text_input("Numéro", "FAC-2026-001")
+        import datetime
+        issue_date = st.date_input("Date d'émission", datetime.date.today())
+    with col6:
+        due_date    = st.date_input("Date d'échéance",
+                                    datetime.date.today() + datetime.timedelta(days=30))
+        notes       = st.text_input("Note / objet", "")
+    with col7:
+        contract_ref = st.text_input("Réf. contrat (BT-12)", "")
+        purchase_order = st.text_input("Bon de commande (BT-13)", "")
 
     st.divider()
+
+    # ── Lignes de facture ─────────────────────────────────
     st.markdown("#### 📦 Lignes de facture")
-
-    if "lines" not in st.session_state:
-        st.session_state.lines = [
-            {"desc": "Audit système de facturation", "qty": 3.0, "price": 800.0, "vat": 20.0},
-            {"desc": "Implémentation connecteur Chorus Pro", "qty": 5.0, "price": 950.0, "vat": 20.0},
-            {"desc": "Formation équipe comptable", "qty": 2.0, "price": 600.0, "vat": 20.0},
-        ]
-
+    nb_lines = st.number_input("Nombre de lignes", min_value=1, max_value=20,
+                               value=2, step=1)
     lines_data = []
-    for i, line in enumerate(st.session_state.lines):
-        cols = st.columns([4, 1, 2, 1, 0.5])
-        with cols[0]:
-            desc = st.text_input("Description", value=line["desc"], key=f"l_desc_{i}", label_visibility="collapsed")
-        with cols[1]:
-            qty = st.number_input("Qté", value=line["qty"], key=f"l_qty_{i}", min_value=0.0, step=0.5, label_visibility="collapsed")
-        with cols[2]:
-            price = st.number_input("Prix HT (€)", value=line["price"], key=f"l_price_{i}", min_value=0.0, step=10.0, label_visibility="collapsed")
-        with cols[3]:
-            vat = st.selectbox("TVA %", options=[0.0, 5.5, 10.0, 20.0], index=3, key=f"l_vat_{i}", label_visibility="collapsed")
-        with cols[4]:
-            if st.button("🗑️", key=f"del_{i}"):
-                st.session_state.lines.pop(i)
-                st.rerun()
-        lines_data.append({"desc": desc, "qty": qty, "price": price, "vat": vat})
-
-    if st.button("➕ Ajouter une ligne"):
-        st.session_state.lines.append({"desc": "Nouvelle prestation", "qty": 1.0, "price": 500.0, "vat": 20.0})
-        st.rerun()
-
-    if lines_data:
-        total_ht  = sum(Decimal(str(l["qty"])) * Decimal(str(l["price"])) for l in lines_data)
-        total_vat = sum(Decimal(str(l["qty"])) * Decimal(str(l["price"])) * Decimal(str(l["vat"])) / 100 for l in lines_data)
-        total_ttc = total_ht + total_vat
-
-        st.divider()
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total HT", f"{float(total_ht):,.2f} €")
-        m2.metric("TVA", f"{float(total_vat):,.2f} €")
-        m3.metric("Total TTC", f"{float(total_ttc):,.2f} €")
+    for i in range(int(nb_lines)):
+        with st.expander(f"Ligne {i+1}", expanded=(i == 0)):
+            lc1, lc2, lc3, lc4 = st.columns([3, 1, 1, 1])
+            with lc1:
+                desc = st.text_input("Désignation",
+                                     f"Prestation {i+1}", key=f"desc_{i}")
+            with lc2:
+                qty  = st.number_input("Quantité", min_value=0.01,
+                                       value=1.0, key=f"qty_{i}")
+            with lc3:
+                price = st.number_input("Prix unitaire HT",
+                                        min_value=0.0, value=100.0,
+                                        key=f"price_{i}")
+            with lc4:
+                vat  = st.selectbox("TVA (%)", [20.0, 10.0, 5.5, 0.0],
+                                    key=f"vat_{i}")
+            lines_data.append((desc, qty, price, vat))
 
     st.divider()
-    notes = st.text_area("Notes / Mentions légales",
-                          value="Merci pour votre confiance. Paiement par virement SEPA sous 30 jours.",
-                          height=80)
 
-    # ── Génération XML ────────────────────────────────────
-    if st.button("🔧 Générer la facture XML", type="primary", use_container_width=True):
+    # ── Bouton génération ─────────────────────────────────
+    if st.button("🔧 Générer la facture", type="primary", use_container_width=True):
         try:
-            seller = Party(
-                name=seller_name, siret=seller_siret, vat_number=seller_vat,
-                address=Address(seller_street, seller_city, seller_cp),
-                iban=seller_iban or None,
-            )
-            buyer = Party(
-                name=buyer_name, siret=buyer_siret, vat_number=buyer_vat,
-                address=Address(buyer_street, buyer_city, buyer_cp),
-            )
-            invoice_lines = [
-                InvoiceLine(
-                    description=l["desc"],
-                    quantity=Decimal(str(l["qty"])),
-                    unit_price=Decimal(str(l["price"])),
-                    vat_rate=Decimal(str(l["vat"])),
-                )
-                for l in lines_data
-            ]
+            from decimal import Decimal
+
             invoice = Invoice(
                 number=invoice_number,
                 issue_date=issue_date,
-                due_date=issue_date + timedelta(days=due_days),
-                seller=seller,
-                buyer=buyer,
-                lines=invoice_lines,
+                due_date=due_date,
+                notes=notes,
+                contract_ref=contract_ref,
+                purchase_order=purchase_order,
                 profile=profile,
-                notes=notes if notes else None,
-            )
-            xml_content = generate_facturx_xml(invoice)
-            st.session_state["xml_content"] = xml_content
-            st.session_state["invoice_obj"]  = invoice
-            st.session_state["submission_id"] = None
-            st.success("✅ Facture XML générée avec succès !")
-
-            with st.expander("📄 Aperçu XML (100 premières lignes)"):
-                st.code("\n".join(xml_content.split("\n")[:100]), language="xml")
-
-            st.download_button(
-                label="⬇️ Télécharger le fichier XML",
-                data=xml_content.encode("utf-8"),
-                file_name=f"{invoice_number}.xml",
-                mime="application/xml",
-            )
-
-        except Exception as e:
-            st.error(f"❌ Erreur lors de la génération : {e}")
-
-    # ── Génération Factur-X PDF/A-3 ───────────────────────
-    if "xml_content" in st.session_state and "invoice_obj" in st.session_state:
-        st.divider()
-        if st.button("📄 Générer le Factur-X complet (PDF/A-3b)", use_container_width=True):
-            with st.spinner("Génération du Factur-X PDF/A-3b..."):
-                try:
-                    fx_bytes = build_facturx(
-                        st.session_state["invoice_obj"],
-                        st.session_state["xml_content"]
+                seller=Party(
+                    name=seller_name, siret=seller_siret,
+                    vat_number=seller_vat, iban=seller_iban, bic=seller_bic,
+                    address=Address(street=seller_street, city=seller_city,
+                                    postal_code=seller_zip, country=seller_country),
+                ),
+                buyer=Party(
+                    name=buyer_name, siret=buyer_siret,
+                    address=Address(city=buyer_city, country=buyer_country),
+                ),
+                lines=[
+                    InvoiceLine(
+                        description=d, quantity=Decimal(str(q)),
+                        unit_price=Decimal(str(p)), vat_rate=Decimal(str(v))
                     )
-                    inv_num = st.session_state["invoice_obj"].number
+                    for d, q, p, v in lines_data
+                ],
+            )
+
+            # ── UBL 2.1 ───────────────────────────────────
+            if "UBL" in syntax:
+                xml_content = generate_ubl_xml(invoice)
+                st.session_state["xml_content"] = xml_content
+                st.session_state["xml_syntax"]  = "UBL"
+                st.session_state["invoice_obj"] = invoice
+                st.success("✅ Facture UBL 2.1 générée (Peppol BIS Billing 3.0) !")
+                st.download_button(
+                    label="⬇️ Télécharger UBL 2.1 (.xml)",
+                    data=xml_content.encode("utf-8"),
+                    file_name=f"{invoice_number}_ubl21.xml",
+                    mime="application/xml",
+                )
+                with st.expander("📄 Aperçu XML UBL 2.1"):
+                    st.code(xml_content[:2000], language="xml")
+
+            # ── CII pur ────────────────────────────────────
+            elif "CII pur" in syntax:
+                from generate_invoice import generate_facturx_xml
+                xml_content = generate_facturx_xml(invoice)
+                st.session_state["xml_content"] = xml_content
+                st.session_state["xml_syntax"]  = "CII"
+                st.session_state["invoice_obj"] = invoice
+                st.success("✅ Facture CII générée !")
+                st.download_button(
+                    label="⬇️ Télécharger CII (.xml)",
+                    data=xml_content.encode("utf-8"),
+                    file_name=f"{invoice_number}_cii.xml",
+                    mime="application/xml",
+                )
+
+            # ── Factur-X PDF/A-3b ──────────────────────────
+            else:
+                from generate_invoice import generate_facturx_xml
+                xml_content = generate_facturx_xml(invoice)
+                st.session_state["xml_content"] = xml_content
+                st.session_state["xml_syntax"]  = "CII"
+                st.session_state["invoice_obj"] = invoice
+                st.success("✅ XML CII Factur-X généré !")
+                st.download_button(
+                    label="⬇️ Télécharger XML CII (.xml)",
+                    data=xml_content.encode("utf-8"),
+                    file_name=f"{invoice_number}.xml",
+                    mime="application/xml",
+                )
+
+                # Bouton PDF séparé (génération lourde)
+                if st.button("📄 Générer le Factur-X complet (PDF/A-3b)",
+                             use_container_width=True):
+                    with st.spinner("Génération PDF/A-3b en cours..."):
+                        fx_bytes = build_facturx(invoice, xml_content)
                     st.download_button(
-                        label="⬇️ Télécharger le Factur-X (.pdf)",
+                        label="⬇️ Télécharger Factur-X (.pdf)",
                         data=fx_bytes,
-                        file_name=f"{inv_num}.pdf",
+                        file_name=f"{invoice_number}_facturx.pdf",
                         mime="application/pdf",
                     )
-                    st.success("✅ Factur-X PDF/A-3b généré — XML CII embarqué dans le PDF")
-                    st.info("📌 Ce fichier contient le PDF lisible ET le XML légal. Il est conforme à la norme Factur-X pour la réforme 2026.")
-                except Exception as e:
-                    st.error(f"❌ Erreur PDF/A-3 : {e}")
+
+        except Exception as e:
+            st.error(f"❌ Erreur génération : {e}")
+            import traceback
+            st.code(traceback.format_exc())
+
 
 # ═══════════════════════════════════════════
 # TAB 2 — Validation
 # ═══════════════════════════════════════════
 
 with tab2:
-    st.subheader("Validation de la facture")
+    st.subheader("Validation de la facture électronique")
 
+    # ── Sélecteur source ──────────────────────────────────
     xml_source = st.radio(
         "Source",
         ["Facture générée ci-dessus",
-         "Uploader un fichier XML",
+         "Uploader un fichier XML (CII ou UBL)",
          "Uploader un Factur-X PDF"],
         horizontal=True
     )
 
     xml_to_validate = None
+    syntax_detect   = st.session_state.get("xml_syntax", "CII")
 
+    # ── Source 1 : session ────────────────────────────────
     if xml_source == "Facture générée ci-dessus":
         if "xml_content" in st.session_state:
             xml_to_validate = st.session_state["xml_content"]
-            st.success("Facture chargée depuis l'étape précédente")
+            syntax_detect   = st.session_state.get("xml_syntax", "CII")
+            badge = "UBL 2.1" if syntax_detect == "UBL" else "CII Factur-X"
+            st.success(f"✅ Facture chargée depuis Tab 1 — Format : **{badge}**")
         else:
-            st.warning("⚠️ Générez d'abord une facture dans l'onglet précédent")
+            st.warning("⚠️ Générez d'abord une facture dans l'onglet 1")
 
-    elif xml_source == "Uploader un fichier XML":
-        uploaded = st.file_uploader("Choisir un fichier XML Factur-X", type=["xml"])
+    # ── Source 2 : upload XML ──────────────────────────────
+    elif xml_source == "Uploader un fichier XML (CII ou UBL)":
+        uploaded = st.file_uploader(
+            "Choisir un fichier XML (.xml)",
+            type=["xml"],
+            help="Formats acceptés : CII Factur-X (CrossIndustryInvoice) et UBL 2.1 (Invoice)"
+        )
         if uploaded:
             content = uploaded.read()
             try:
@@ -351,26 +262,49 @@ with tab2:
             except UnicodeDecodeError:
                 xml_to_validate = content.decode("latin-1")
 
+            # Auto-détection syntaxe
+            syntax_detect = detect_syntax(xml_to_validate)
+            badge = "UBL 2.1" if syntax_detect == "UBL" else "CII"
+            st.info(f"📄 Format détecté : **{badge}**")
+
+            if "CrossIndustryInvoice" not in xml_to_validate and \
+               "oasis" not in xml_to_validate and \
+               "Invoice-2" not in xml_to_validate:
+                st.error(
+                    "❌ Format non reconnu (ni CII ni UBL). "
+                    "Utilisez le Tab 🔄 Conversion pour convertir un XML legacy."
+                )
+                xml_to_validate = None
+
+    # ── Source 3 : upload PDF Factur-X ────────────────────
     elif xml_source == "Uploader un Factur-X PDF":
-        st.info("Uploadez un PDF généré par cet outil (bouton 'Générer le Factur-X complet' dans l'onglet 1).")
+        st.info("Uploadez un PDF **Factur-X** contenant un XML CII embarqué.")
         uploaded_pdf = st.file_uploader(
-            "Choisir un fichier Factur-X (.pdf)", type=["pdf"], key="pdf_upload"
+            "Choisir un fichier Factur-X (.pdf)",
+            type=["pdf"],
+            key="pdf_upload"
         )
         if uploaded_pdf:
             pdf_bytes = uploaded_pdf.read()
             try:
                 xml_to_validate, detected_profile = extract_xml_from_facturx(pdf_bytes)
-                if "<facture>" in xml_to_validate or "CrossIndustryInvoice" not in xml_to_validate:
+                if "<facture>" in xml_to_validate or \
+                   ("CrossIndustryInvoice" not in xml_to_validate and \
+                    "oasis" not in xml_to_validate):
                     st.error(
-                        "❌ Le XML embarqué dans ce PDF est au **format propriétaire** "
-                        "(pas au format CII Factur-X). Ce PDF vient d'un système legacy "
-                        "et n'est pas conforme à la réforme 2026."
+                        "❌ Le XML embarqué est au **format propriétaire** — "
+                        "pas conforme à la réforme 2026."
                     )
                     xml_to_validate = None
                 else:
-                    st.success(f"✅ XML CII extrait du PDF — Profil : **{detected_profile}**")
-                    with st.expander("📄 Aperçu du XML extrait (50 premières lignes)"):
-                        st.code("\n".join(xml_to_validate.split("\n")[:50]), language="xml")
+                    syntax_detect = detect_syntax(xml_to_validate)
+                    st.success(
+                        f"✅ XML extrait du PDF — "
+                        f"Profil : **{detected_profile}** — "
+                        f"Syntaxe : **{syntax_detect}**"
+                    )
+                    with st.expander("📄 Aperçu XML extrait"):
+                        st.code(xml_to_validate[:1000], language="xml")
                     st.download_button(
                         label="⬇️ Télécharger le XML extrait",
                         data=xml_to_validate.encode("utf-8"),
@@ -381,355 +315,183 @@ with tab2:
                 st.error(f"❌ {e}")
                 xml_to_validate = None
 
-    # Feedback format avant validation
+    # ── Feedback format ───────────────────────────────────
     if xml_to_validate:
-        if "CrossIndustryInvoice" not in xml_to_validate:
-            st.warning(
-                "⚠️ Le contenu chargé n'est pas un XML CII Factur-X — "
-                "la validation va échouer structurellement."
-            )
+        if syntax_detect == "UBL":
+            st.info("📋 Validation UBL 2.1 : "
+                    "Schematron CEN EN16931-UBL + règles sémantiques Annexe 7 (via mapper BT)")
+        else:
+            st.info("📋 Validation CII : "
+                    "Schematron CEN EN16931-CII + règles DGFiP Annexe 7")
 
-    # Initialisation
+    # ─────────────────────────────────────────────────────
+    # BOUTON VALIDER
+    # ─────────────────────────────────────────────────────
     result     = None
     sch_result = None
     ai_result  = None
 
-    if xml_to_validate and st.button("🔍 Valider la facture", type="primary", use_container_width=True):
-
+    if xml_to_validate and st.button(
+        "🔍 Valider la facture", type="primary", use_container_width=True
+    ):
         tmp_path = "/tmp/facture_validation.xml"
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(xml_to_validate)
 
         # ══════════════════════════════════════════════════
-        # CONTRÔLE 1 — Conformité structurelle DGFiP
+        # CONTRÔLE 1 — Norme européenne EN16931
         # ══════════════════════════════════════════════════
         st.divider()
-        st.markdown("#### 🏛️ Contrôle 1 — Conformité structurelle DGFiP")
-        st.caption(
-            "La DGFiP impose un format CII (Cross Industry Invoice) précis pour la réforme 2026. "
-            "Ces contrôles vérifient que le document respecte la structure minimale : "
-            "élément racine, profil Factur-X, numéro, date, TypeCode. "
-            "Un document qui échoue ici sera rejeté immédiatement par toute plateforme "
-            "de dématérialisation (PDP/PPF)."
+        label_c1 = (
+            "#### 🇪🇺 Contrôle 1 — Norme européenne EN 16931 · UBL 2.1 (Peppol BIS Billing 3.0)"
+            if syntax_detect == "UBL"
+            else "#### 🇪🇺 Contrôle 1 — Norme européenne EN 16931 (CEN/TC 434 · CII)"
         )
+        st.markdown(label_c1)
 
-        validator = InvoiceValidator(tmp_path)
-        result    = validator.validate()
-
-        nb_dgfip_total = len(result.errors) + len(result.warnings) + len(result.infos)
-
-        col_v1, col_v2, col_v3, col_v4 = st.columns(4)
-        col_v1.metric("Statut DGFiP", "✅ VALIDE" if result.is_valid else "❌ INVALIDE")
-        col_v2.metric("Tests exécutés", nb_dgfip_total)
-        col_v3.metric("Erreurs", len(result.errors))
-        col_v4.metric("Warnings", len(result.warnings))
-
-        if result.is_valid:
-            st.success("🎉 Structure conforme aux exigences DGFiP !")
+        if syntax_detect == "UBL":
+            st.caption(
+                "La France a adopté la norme européenne EN 16931 comme socle commun. "
+                "Pour UBL 2.1, le moteur applique les règles BR-* du XSLT officiel CEN "
+                "adapté à la syntaxe OASIS — c'est le format natif du réseau **Peppol**, "
+                "protocole d'interopérabilité inter-plateformes reconnu par la réforme 2026."
+            )
         else:
-            st.error(f"La facture comporte {len(result.errors)} erreur(s) bloquante(s)")
-
-        for issue in result.errors:
-            html = (
-                '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
-                'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                '❌ <strong style="color:#c0392b;">[' + str(issue.rule_id) + ']</strong> '
-                '<span style="color:#333333;">' + str(issue.message) + '</span>'
-                '</div>'
+            st.caption(
+                "La France a adopté la norme européenne EN 16931 comme socle commun. "
+                "Ce contrôle applique les ~120 règles BR-* officielles du CEN "
+                "(Comité Européen de Normalisation) : cohérence arithmétique, "
+                "codelists ISO, règles TVA. Un document conforme EN 16931 est "
+                "interopérable dans toute l'Union Européenne."
             )
-            st.markdown(html, unsafe_allow_html=True)
 
-        for issue in result.warnings:
-            html = (
-                '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
-                'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                '⚠️ <strong style="color:#b8860b;">[' + str(issue.rule_id) + ']</strong> '
-                '<span style="color:#333333;">' + str(issue.message) + '</span>'
-                '</div>'
-            )
-            st.markdown(html, unsafe_allow_html=True)
+        with st.spinner(f"Application des règles Schematron CEN ({syntax_detect})..."):
+            sch_result = validate_en16931(tmp_path, syntax=syntax_detect)
 
-        ok_items = result.infos
-        if ok_items:
-            with st.expander(f"✅ {len(ok_items)} règle(s) DGFiP passée(s)"):
-                for issue in ok_items:
-                    html = (
-                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
-                        'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                        '✅ <strong style="color:#1a7a4a;">[' + str(issue.rule_id) + ']</strong> '
-                        '<span style="color:#333333;">' + str(issue.message) + '</span>'
-                        '</div>'
-                    )
-                    st.markdown(html, unsafe_allow_html=True)
-
-        # ══════════════════════════════════════════════════
-        # CONTRÔLE 2 — Norme européenne EN 16931
-        # ══════════════════════════════════════════════════
-        st.divider()
-        st.markdown("#### 🇪🇺 Contrôle 2 — Norme européenne EN 16931 (CEN/TC 434)")
-        st.caption(
-            "La France a adopté la norme européenne EN 16931 comme socle commun de la facturation "
-            "électronique. Ce contrôle applique les ~120 règles BR-* officielles du CEN "
-            "(Comité Européen de Normalisation) : cohérence arithmétique, codelists ISO, "
-            "règles TVA par catégorie. Un document conforme EN 16931 est interopérable "
-            "dans toute l'Union Européenne."
-        )
-
-        with st.spinner("Application des règles Schematron CEN v1.3.15..."):
-            sch_result = validate_en16931(tmp_path)
-
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-        col_s1.metric("Statut EN16931", "✅ CONFORME" if sch_result.is_valid else "❌ NON CONFORME")
-        col_s2.metric("Règles BR-* vérifiées", "~120")
-        col_s3.metric("Erreurs BR-*", len(sch_result.errors))
-        col_s4.metric("Warnings BR-*", len(sch_result.warnings))
-
-        # Liste exhaustive des règles EN16931 CII (source : spec CEN/TC 434 v1.3.15)
+        # ── Référentiel BR-* complet (dynamique) ──────────
         ALL_BR_RULES = {
-            "BR-01": "Identifiant de spécification (BT-24) obligatoire",
-            "BR-02": "Numéro de facture (BT-1) obligatoire",
-            "BR-03": "Date d'émission (BT-2) obligatoire",
-            "BR-04": "TypeCode (BT-3) obligatoire",
-            "BR-05": "Devise (BT-5) obligatoire",
-            "BR-06": "Nom du vendeur (BT-27) obligatoire",
-            "BR-07": "Nom de l'acheteur (BT-44) obligatoire",
-            "BR-08": "Adresse postale vendeur — code pays obligatoire",
-            "BR-09": "Code pays vendeur — ISO 3166-1 alpha-2",
-            "BR-10": "Adresse postale acheteur — code pays obligatoire",
-            "BR-11": "Si identifiant vendeur (BT-29) : SchemeID obligatoire",
-            "BR-12": "Si identifiant acheteur (BT-46) : SchemeID obligatoire",
-            "BR-13": "Si identifiant tiers (BT-60) : SchemeID obligatoire",
-            "BR-15": "Si BG-13 présent : BT-81 obligatoire",
-            "BR-16": "Au moins une ligne de facture obligatoire",
-            "BR-17": "Référence à une facture précédente — BT-25 obligatoire si BG-3",
-            "BR-18": "Si identifiant vendeur fiscal (BT-32) : SchemeID obligatoire",
-            "BR-19": "Si identifiant acheteur fiscal (BT-49) : SchemeID obligatoire",
-            "BR-20": "Si référence projet (BT-11) présente : valeur non vide",
-            "BR-21": "Identifiant ligne (BT-126) obligatoire",
-            "BR-22": "Quantité facturée (BT-129) obligatoire",
-            "BR-23": "Unité de mesure (BT-130) obligatoire",
-            "BR-24": "Montant net ligne (BT-131) obligatoire",
-            "BR-25": "Nom article (BT-153) obligatoire",
-            "BR-26": "Code TVA ligne (BT-151) obligatoire",
-            "BR-27": "Prix unitaire net (BT-146) obligatoire",
-            "BR-28": "Prix de base (BT-148) obligatoire si remise ligne",
-            "BR-29": "Si BT-73 et BT-74 présents : BT-74 >= BT-73",
-            "BR-30": "Si remise (BG-27) : BT-92 et BT-94 obligatoires",
-            "BR-31": "Le vendeur doit avoir SIRET ou TVA intracommunautaire",
-            "BR-32": "Si BG-28 : BT-99 et BT-101 obligatoires",
-            "BR-33": "BT-92 doit être positif",
-            "BR-36": "Adresse vendeur — ville (BT-37) obligatoire",
-            "BR-37": "Adresse vendeur — code postal (BT-38) obligatoire",
-            "BR-38": "Adresse acheteur — ville (BT-53) obligatoire si BG-8",
-            "BR-41": "BT-99 doit être positif",
-            "BR-42": "Si BG-23 avec BT-118 : BT-116 et BT-117 obligatoires",
-            "BR-43": "BT-110 = somme des BT-117",
-            "BR-44": "Si BT-6 présent : valeur non vide",
-            "BR-45": "Si BT-19 présent : valeur non vide",
-            "BR-46": "Si BT-83 présent : BT-84 obligatoire",
-            "BR-47": "Si BT-81=30 ou 58 : BT-84 (IBAN) obligatoire",
-            "BR-48": "Si BT-81=54 : BT-86 (carte) obligatoire",
-            "BR-49": "Si BT-133 présent : valeur non vide",
-            "BR-50": "BT-92 <= BT-93 si BT-93 présent",
-            "BR-51": "Si BG-26 : BT-104 et BT-106 obligatoires",
-            "BR-52": "Si BG-27 ligne : BT-137 et BT-138 obligatoires",
-            "BR-53": "BT-148 >= BT-146 si remise ligne",
-            "BR-54": "Si BT-155 présent : SchemeID obligatoire",
-            "BR-55": "BG-3 : BT-25 obligatoire",
-            "BR-56": "Si BT-134 présent : SchemeID obligatoire",
-            "BR-57": "Si BG-24 : BT-122 ou BT-123 obligatoire",
-            "BR-61": "Si BT-81=30 : BT-85 (nom compte) recommandé",
-            "BR-62": "Si BT-87 présent : BT-88 obligatoire",
-            "BR-63": "Si BT-89 présent : valeur non vide",
-            "BR-64": "BT-115 >= 0",
-            "BR-65": "Si BT-114 présent : valeur >= 0",
-            "BR-AE-1":  "Autoliquidation — mention BT-120/BT-121 obligatoire",
-            "BR-AE-2":  "Autoliquidation — BT-118=AE sur toutes les lignes ou aucune",
-            "BR-AE-3":  "Autoliquidation — BT-95=AE cohérent avec BT-118",
-            "BR-AE-4":  "Autoliquidation — TVA calculée doit être 0",
-            "BR-AE-5":  "Autoliquidation — BT-117 doit être 0",
-            "BR-AE-6":  "Autoliquidation — BT-119 ne doit pas être renseigné",
-            "BR-AE-7":  "Autoliquidation — BT-116 doit être positif",
-            "BR-AE-8":  "Autoliquidation — BT-110 doit être 0",
-            "BR-AE-9":  "Autoliquidation — BG-23 : un seul groupe AE autorisé",
-            "BR-AE-10": "Autoliquidation — BT-121 ou BT-120 obligatoire",
-            "BR-E-1":   "Exonération — BT-120 ou BT-121 obligatoire",
-            "BR-E-2":   "Exonération — BT-118=E sur toutes les lignes ou aucune",
-            "BR-E-3":   "Exonération — BT-95=E cohérent",
-            "BR-E-4":   "Exonération — TVA calculée doit être 0",
-            "BR-E-5":   "Exonération — BT-117 doit être 0",
-            "BR-E-6":   "Exonération — BT-119 ne doit pas être renseigné",
-            "BR-E-7":   "Exonération — BT-116 doit être positif",
-            "BR-E-8":   "Exonération — BT-110 doit être 0",
-            "BR-E-9":   "Exonération — BG-23 : un seul groupe E autorisé",
-            "BR-G-1":   "Export — BT-120 ou BT-121 obligatoire",
-            "BR-G-2":   "Export — BT-118=G cohérent",
-            "BR-G-4":   "Export — BT-117 doit être 0",
-            "BR-G-7":   "Export — BT-116 doit être positif",
-            "BR-IC-1":  "Intracommunautaire — BT-120 ou BT-121 obligatoire",
-            "BR-IC-2":  "Intracommunautaire — BT-118=K cohérent",
-            "BR-IC-4":  "Intracommunautaire — BT-117 doit être 0",
-            "BR-IC-7":  "Intracommunautaire — BT-116 doit être positif",
-            "BR-IC-11": "Intracommunautaire — BT-55 (pays acheteur) obligatoire",
-            "BR-IC-12": "Intracommunautaire — BT-40 (pays vendeur) obligatoire",
-            "BR-O-1":   "Hors périmètre — BT-120 ou BT-121 obligatoire",
-            "BR-O-4":   "Hors périmètre — BT-117 doit être 0",
-            "BR-O-11":  "Hors périmètre — pas d'autres catégories TVA",
-            "BR-O-12":  "Hors périmètre — BT-95 doit être O",
-            "BR-O-13":  "Hors périmètre — BT-151 doit être O",
-            "BR-S-1":   "Taux standard — BT-119 (RateApplicablePercent) obligatoire",
-            "BR-S-2":   "Taux standard — BT-118=S cohérent",
-            "BR-S-3":   "Taux standard — BT-95=S cohérent",
-            "BR-S-4":   "Taux standard — BT-117 = BT-116 × BT-119 / 100",
-            "BR-S-6":   "Taux standard — BT-116 doit être positif",
-            "BR-S-7":   "Taux standard — BT-119 doit être > 0",
-            "BR-Z-1":   "Taux zéro — BT-119 obligatoire",
-            "BR-Z-4":   "Taux zéro — BT-117 doit être 0",
-            "BR-Z-6":   "Taux zéro — BT-116 doit être positif",
-            "BR-CO-3":  "Montant net ligne = BT-129 × BT-146",
-            "BR-CO-4":  "BT-131 = BT-129 × BT-146 - remises + charges",
-            "BR-CO-8":  "BT-106 = somme des BT-131",
-            "BR-CO-9":  "BT-109 = somme des BT-116",
-            "BR-CO-10": "BT-112 = BT-109 + BT-110",
-            "BR-CO-11": "BT-115 = BT-112 - BT-113",
-            "BR-CO-12": "BT-107 = somme des BT-92",
-            "BR-CO-13": "BT-110 = somme des BT-117",
-            "BR-CO-14": "BT-108 = somme des BT-99",
-            "BR-CO-15": "BT-109 = BT-106 - BT-107 + BT-108",
-            "BR-CO-16": "BT-115 arrondi cohérent",
-            "BR-CO-17": "BT-92 <= BT-93 (remise <= prix de base)",
-            "BR-CO-18": "BT-99 <= BT-100",
-            "BR-CO-19": "Si BG-14 : BT-73 et/ou BT-74 obligatoire",
-            "BR-CO-20": "Si BG-14 ligne : BT-134 et/ou BT-135 obligatoire",
-            "BR-CO-21": "BT-131 arrondi cohérent",
-            "BR-CO-22": "BT-146 arrondi cohérent",
-            "BR-CO-23": "BT-148 arrondi cohérent",
-            "BR-CO-24": "BT-92 arrondi cohérent",
-            "BR-CO-25": "BT-99 arrondi cohérent",
-            "BR-CL-01": "BT-3 (TypeCode) dans codelist UNTDID 1001",
-            "BR-CL-04": "BT-5 (devise) dans codelist ISO 4217",
-            "BR-CL-05": "BT-6 (devise TVA) dans codelist ISO 4217",
-            "BR-CL-06": "BT-40 / BT-55 (pays) dans codelist ISO 3166-1 alpha-2",
-            "BR-CL-07": "BT-95 / BT-118 / BT-151 (TVA catégorie) dans UNCL5305",
-            "BR-CL-10": "BT-81 (moyen de paiement) dans UNTDID 4461",
-            "BR-CL-14": "BT-130 (unité) dans UN/ECE Rec 20 ou Rec 21",
-            "BR-CL-15": "BT-163 (unité prix) dans UN/ECE Rec 20 ou Rec 21",
-            "BR-CL-16": "BT-133 (charge indicator) dans codelist",
-            "BR-CL-17": "BT-136 (charge indicator ligne) dans codelist",
-            "BR-CL-18": "BT-122 (type pièce jointe) dans MimeCode",
-            "BR-CL-19": "BT-23 (code processus) dans codelist",
-            "BR-CL-20": "BT-14 (ref document précédent) — SchemeID dans codelist",
-            "BR-CL-21": "BT-32 (SchemeID vendeur) dans codelist ISO/IEC 6523",
-            "BR-CL-22": "BT-121 (motif exonération) dans codelist VATEX",
-            "BR-CL-23": "BT-130 (unité de mesure) dans UN/ECE Rec 20",
-            "BR-CL-24": "BT-163 (unité de prix) dans UN/ECE Rec 20",
-            "BR-CL-25": "BT-46 (SchemeID acheteur) dans codelist ISO/IEC 6523",
-            "BR-CL-26": "BT-60 (SchemeID tiers) dans codelist ISO/IEC 6523",
-            "BR-DEC-01":"BT-116 (BasisAmount) : max 2 décimales",
-            "BR-DEC-02":"BT-117 (CalculatedAmount) : max 2 décimales",
-            "BR-DEC-03":"BT-119 (RateApplicablePercent) : max 2 décimales",
-            "BR-DEC-04":"BT-92 (AllowanceAmount) : max 2 décimales",
-            "BR-DEC-05":"BT-93 (AllowanceBaseAmount) : max 2 décimales",
-            "BR-DEC-06":"BT-94 (AllowancePercent) : max 2 décimales",
-            "BR-DEC-07":"BT-99 (ChargeAmount) : max 2 décimales",
-            "BR-DEC-08":"BT-100 (ChargeBaseAmount) : max 2 décimales",
-            "BR-DEC-09":"BT-131 (LineTotalAmount) : max 2 décimales",
-            "BR-DEC-10":"BT-137 (AllowanceAmount ligne) : max 2 décimales",
-            "BR-DEC-11":"BT-138 (AllowanceBase ligne) : max 2 décimales",
-            "BR-DEC-12":"BT-112 (GrandTotalAmount) : max 2 décimales",
-            "BR-DEC-13":"BT-115 (DuePayableAmount) : max 2 décimales",
-            "BR-DEC-14":"BT-146 (NetPrice) : max 10 décimales",
-            "BR-DEC-15":"BT-148 (GrossPrice) : max 10 décimales",
-            "BR-DEC-16":"BT-149 (AllowanceQuantity) : max 10 décimales",
-            "BR-DEC-17":"BT-150 (BaseQuantity) : max 10 décimales",
-            "BR-DEC-18":"BT-129 (BilledQuantity) : max 10 décimales",
-            "BR-DEC-19":"BT-104 (AllowanceAmount entête) : max 2 décimales",
-            "BR-DEC-20":"BT-106 (LineTotalAmount entête) : max 2 décimales",
-            "BR-DEC-21":"BT-107 (AllowanceTotalAmount) : max 2 décimales",
-            "BR-DEC-22":"BT-108 (ChargeTotalAmount) : max 2 décimales",
-            "BR-DEC-23":"BT-109 (TaxBasisTotalAmount) : max 2 décimales",
-            "BR-DEC-24":"BT-110 (TaxTotalAmount) : max 2 décimales",
-            "BR-DEC-25":"BT-113 (PrepaidAmount) : max 2 décimales",
-            "BR-DEC-26":"BT-114 (RoundingAmount) : max 2 décimales",
+            "BR-01":"Identifiant de spécification (BT-24) obligatoire",
+            "BR-02":"Numéro de facture (BT-1) obligatoire",
+            "BR-03":"Date d'émission (BT-2) obligatoire",
+            "BR-04":"TypeCode (BT-3) obligatoire",
+            "BR-05":"Devise (BT-5) obligatoire",
+            "BR-06":"Nom du vendeur (BT-27) obligatoire",
+            "BR-07":"Nom de l'acheteur (BT-44) obligatoire",
+            "BR-08":"Adresse vendeur — code pays obligatoire",
+            "BR-09":"Code pays vendeur — ISO 3166-1 alpha-2",
+            "BR-10":"Adresse acheteur — code pays obligatoire",
+            "BR-16":"Au moins une ligne de facture obligatoire",
+            "BR-21":"Identifiant ligne (BT-126) obligatoire",
+            "BR-22":"Quantité facturée (BT-129) obligatoire",
+            "BR-23":"Unité de mesure (BT-130) obligatoire",
+            "BR-24":"Montant net ligne (BT-131) obligatoire",
+            "BR-25":"Nom article (BT-153) obligatoire",
+            "BR-26":"Code TVA ligne (BT-151) obligatoire",
+            "BR-27":"Prix unitaire net (BT-146) obligatoire",
+            "BR-31":"Vendeur : SIRET ou TVA intracommunautaire obligatoire",
+            "BR-36":"Adresse vendeur — ville (BT-37) obligatoire",
+            "BR-37":"Adresse vendeur — code postal (BT-38) obligatoire",
+            "BR-43":"BT-110 = somme des BT-117",
+            "BR-47":"Si BT-81=30 ou 58 : BT-84 (IBAN) obligatoire",
+            "BR-CO-3":"Montant net ligne = quantité × prix unitaire",
+            "BR-CO-9":"BT-109 = somme des BT-116",
+            "BR-CO-10":"BT-112 = BT-109 + BT-110",
+            "BR-CO-11":"BT-115 = BT-112 − BT-113",
+            "BR-CO-13":"BT-110 = somme des BT-117",
+            "BR-CO-15":"Cohérence arithmétique HT + TVA = TTC",
+            "BR-CO-16":"DuePayableAmount cohérent",
+            "BR-AE-1":"Autoliquidation — mention BT-120/121 obligatoire",
+            "BR-AE-4":"Autoliquidation — TVA calculée = 0",
+            "BR-E-1":"Exonération — BT-120 ou BT-121 obligatoire",
+            "BR-E-4":"Exonération — TVA calculée = 0",
+            "BR-G-1":"Export — BT-120 ou BT-121 obligatoire",
+            "BR-IC-1":"Intracommunautaire — BT-120 ou BT-121 obligatoire",
+            "BR-IC-11":"Intracommunautaire — BT-55 (pays acheteur) obligatoire",
+            "BR-IC-12":"Intracommunautaire — BT-40 (pays vendeur) obligatoire",
+            "BR-O-1":"Hors périmètre — BT-120 ou BT-121 obligatoire",
+            "BR-S-1":"Taux standard — BT-119 (RateApplicablePercent) obligatoire",
+            "BR-S-4":"Taux standard — BT-117 = BT-116 × BT-119 / 100",
+            "BR-Z-1":"Taux zéro — BT-119 obligatoire",
+            "BR-CL-01":"TypeCode dans codelist UNTDID 1001",
+            "BR-CL-04":"Devise — ISO 4217",
+            "BR-CL-06":"Code pays — ISO 3166-1 alpha-2",
+            "BR-CL-07":"Catégorie TVA — UNCL5305",
+            "BR-CL-10":"Moyen de paiement — UNTDID 4461",
+            "BR-CL-14":"Unité de mesure — UN/ECE Rec 20 ou Rec 21",
+            "BR-DEC-01":"BT-116 (BasisAmount) — max 2 décimales",
+            "BR-DEC-02":"BT-117 (CalculatedAmount) — max 2 décimales",
+            "BR-DEC-09":"BT-131 (LineTotalAmount) — max 2 décimales",
+            "BR-DEC-12":"BT-112 (GrandTotalAmount) — max 2 décimales",
+            "BR-DEC-13":"BT-115 (DuePayableAmount) — max 2 décimales",
         }
 
-        # IDs des règles en erreur ou warning
-        failed_ids = {i.rule_id for i in sch_result.errors + sch_result.warnings}
-
-        # Règles OK = toutes sauf celles en échec
+        failed_ids   = {i.rule_id for i in sch_result.errors + sch_result.warnings}
         passed_rules = {k: v for k, v in ALL_BR_RULES.items() if k not in failed_ids}
-        unknown_rules = {k: v for k, v in ALL_BR_RULES.items() if k in failed_ids}
-
-        nb_all      = len(ALL_BR_RULES)
-        nb_passed   = len(passed_rules)
-        nb_failed   = len(sch_result.errors)
-        nb_warnings = len(sch_result.warnings)
+        nb_all       = len(ALL_BR_RULES)
 
         col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-        col_s1.metric("Statut EN16931",       "✅ CONFORME" if sch_result.is_valid else "❌ NON CONFORME")
-        col_s2.metric("Règles référentiel",   nb_all)
-        col_s3.metric("Erreurs BR-*",         nb_failed)
-        col_s4.metric("Warnings BR-*",        nb_warnings)
+        col_s1.metric("Statut EN16931",
+                      "✅ CONFORME" if sch_result.is_valid else "❌ NON CONFORME")
+        col_s2.metric("Référentiel BR-*",   nb_all)
+        col_s3.metric("Erreurs",            len(sch_result.errors))
+        col_s4.metric("Warnings",           len(sch_result.warnings))
 
         if sch_result.is_valid:
-            st.success("🎉 Conforme à la norme européenne EN 16931 (CEN/TC 434) !")
-
-            with st.expander(f"✅ {nb_passed} règles BR-* passées (moteur XSLT CEN v1.3.15)"):
+            st.success("🎉 Conforme à la norme européenne EN 16931 !")
+            with st.expander(
+                f"✅ {len(passed_rules)} règles BR-* conformes "
+                f"(moteur XSLT CEN {syntax_detect} v1.3.15)"
+            ):
                 for rule_id, desc in passed_rules.items():
-                    html = (
-                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
-                        'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
-                        '✅ <strong style="color:#1a7a4a;">[' + rule_id + ']</strong> '
-                        '<span style="color:#333333;font-size:0.9rem;">' + desc + '</span>'
-                        '</div>'
+                    st.markdown(
+                        f'<div style="background:#f0fff4;border-left:4px solid #1a7a4a;'
+                        f'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
+                        f'✅ <strong style="color:#1a7a4a;">[{rule_id}]</strong> '
+                        f'<span style="color:#333;font-size:.9rem;">{desc}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True
                     )
-                    st.markdown(html, unsafe_allow_html=True)
                 st.caption(
-                    f"{nb_passed} règles vérifiées sans anomalie sur {nb_all} du référentiel CEN. "
-                    "Le moteur XSLT CEN/TC 434 v1.3.15 ne remonte que les échecs — "
-                    "les règles absentes de la liste d'erreurs sont considérées conformes."
+                    f"{len(passed_rules)} règles sans anomalie sur {nb_all} du référentiel. "
+                    f"Syntaxe validée : {syntax_detect}. "
+                    "Source : CEN/TC 434 v1.3.15"
                 )
         else:
             for issue in sch_result.errors:
-                html = (
-                    '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
-                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                    '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
-                    '<span style="color:#333333;">' + issue.message + '</span>'
-                    '<br><small style="color:#888;font-size:0.75rem;">📍 ' + issue.location + '</small>'
-                    '</div>'
+                st.markdown(
+                    f'<div style="background:#fff0f0;border-left:4px solid #c0392b;'
+                    f'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    f'❌ <strong style="color:#c0392b;">[{issue.rule_id}]</strong> '
+                    f'<span style="color:#333;">{issue.message}</span>'
+                    f'<br><small style="color:#888;font-size:.75rem;">📍 {issue.location}</small>'
+                    f'</div>',
+                    unsafe_allow_html=True
                 )
-                st.markdown(html, unsafe_allow_html=True)
 
-        if sch_result and sch_result.warnings:
+        if sch_result.warnings:
             with st.expander(f"⚠️ {len(sch_result.warnings)} avertissement(s) EN16931"):
                 for issue in sch_result.warnings:
-                    html = (
-                        '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
-                        'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                        '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
-                        '<span style="color:#333333;">' + issue.message + '</span>'
-                        '</div>'
+                    st.markdown(
+                        f'<div style="background:#fffbf0;border-left:4px solid #b8860b;'
+                        f'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                        f'⚠️ <strong style="color:#b8860b;">[{issue.rule_id}]</strong> '
+                        f'<span style="color:#333;">{issue.message}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True
                     )
-                    st.markdown(html, unsafe_allow_html=True)
-
-        st.markdown("""
-<div style="text-align:right;font-size:0.75rem;color:#888;margin-top:4px;">
-    Source : <a href="https://github.com/ConnectingEurope/eInvoicing-EN16931" target="_blank">
-    CEN/TC 434 — EN16931-CII-validation.xslt v1.3.15</a>
-</div>""", unsafe_allow_html=True)
 
         # ══════════════════════════════════════════════════
-        # CONTRÔLE 3 — Annexe 7 DGFiP
+        # CONTRÔLE 2 — Annexe 7 DGFiP
         # ══════════════════════════════════════════════════
         st.divider()
-        st.markdown("#### 📋 Contrôle 3 — Règles de gestion DGFiP (Annexe 7 v1.8)")
+        st.markdown("#### 📋 Contrôle 2 — Règles de gestion DGFiP (Annexe 7 v1.8)")
         st.caption(
-            "En plus de la norme européenne, la DGFiP a publié des règles de gestion spécifiques "
-            "à la France (Annexe 7, mise à jour octobre 2025). Elles couvrent les particularités "
-            "fiscales françaises : SIRET obligatoire, régimes de TVA FR, mentions légales, "
-            "avoirs et rectificatives. Ces règles s'appliquent uniquement aux factures émises "
-            "ou reçues par des assujettis français."
+            "La DGFiP a publié 235 règles de gestion spécifiques à la France "
+            "(Annexe 7, octobre 2025). Elles couvrent les particularités fiscales françaises : "
+            "SIRET obligatoire, régimes de TVA FR, mentions légales, avoirs et rectificatives. "
+            "Le moteur est **syntaxe-agnostique** : les valeurs BT sont extraites du XML "
+            f"{'via le mapper UBL → BT' if syntax_detect == 'UBL' else 'via XPath CII'} "
+            "puis évaluées sur le modèle sémantique EN16931."
         )
 
         rules_path = Path("rules_engine/rules.json")
@@ -738,90 +500,109 @@ with tab2:
         else:
             with st.spinner("Évaluation des règles Annexe 7 DGFiP..."):
                 ai_val    = AiValidator(rules_path)
-                ai_result = ai_val.validate(
-                            tmp_path,
-                            schematron_ran=(sch_result is not None)
-                        )
 
-            import json as _json
-            with open(rules_path, encoding="utf-8") as _f:
-                _data = _json.load(_f)
-            nb_total_annexe7 = sum(
-                len(v) for k, v in _data.items() if k != "meta" and isinstance(v, list)
-            )
-            nb_applicable = len(ai_val.rules)           # f1=true : dans le périmètre de la démo
-            nb_hors_perim = nb_total_annexe7 - nb_applicable  # f1=false : calculs, PPF, inter-systèmes
+                # ── Mapper UBL → BT si nécessaire ─────────
+                if syntax_detect == "UBL":
+                    from rules_engine.ubl_mapper import extract_bt_values
+                    bt_values = extract_bt_values(tmp_path)
+                    ai_result = ai_val.validate(
+                        tmp_path,
+                        schematron_ran=(sch_result is not None),
+                        bt_override=bt_values
+                    )
+                else:
+                    ai_result = ai_val.validate(
+                        tmp_path,
+                        schematron_ran=(sch_result is not None)
+                    )
+
             nb_tested  = len(ai_result.errors) + len(ai_result.warnings) + len(ai_result.infos)
             nb_skipped = len(ai_result.skipped)
 
+            # Total règles depuis rules.json
+            try:
+                import json
+                with open(rules_path, encoding="utf-8") as f:
+                    rules_data = json.load(f)
+                total_rules = sum(
+                    len(v) for k, v in rules_data.items()
+                    if k != "meta" and isinstance(v, list)
+                )
+            except Exception:
+                total_rules = 235
+
             col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns(5)
-            col_a1.metric("Statut Annexe 7", "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
-            col_a2.metric("Total Annexe 7",  nb_total_annexe7,
-                          help=f"{nb_applicable} dans le périmètre démo • {nb_hors_perim} hors périmètre (calculs, PPF/annuaire)")
-            col_a3.metric("Testées ici",     nb_tested,
-                          help="Règles évaluées sur la facture : présence, format, codelist, conditions")
-            col_a4.metric("Erreurs",         len(ai_result.errors))
-            col_a5.metric("Non testables ici", nb_skipped,
-                          help="Skippées : déjà couvertes par Contrôle 2, ou nécessitent PPF/annuaire DGFiP")
-            st.caption(
-                f"ℹ️ Sur les {nb_total_annexe7} règles de l'Annexe 7 : **{nb_applicable} sont évaluables en local** "
-                f"(présence de champs, formats, codelists, conditions). "
-                f"Les **{nb_hors_perim} autres** concernent des calculs de montants (délégués au Contrôle 2 — XSLT CEN) "
-                f"ou des vérifications PPF/annuaire qui nécessitent un accès à la plateforme de dématérialisation. "
-                f"Parmi les {nb_applicable} règles locales : **{nb_tested} ont été testées** et **{nb_skipped} ont été ignorées** "
-                f"(non applicables à cette facture : TypeCode différent, catégorie TVA non concernée, ou champ optionnel absent)."
-            )
+            col_a1.metric("Statut Annexe 7",
+                          "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
+            col_a2.metric("Règles totales",   total_rules)
+            col_a3.metric("Testées",          nb_tested)
+            col_a4.metric("Erreurs",          len(ai_result.errors))
+            col_a5.metric("Non testables",    nb_skipped)
 
             for issue in ai_result.errors:
-                html = (
-                    '<div style="background-color:#fff0f0;border-left:4px solid #c0392b;'
-                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                    '❌ <strong style="color:#c0392b;">[' + issue.rule_id + ']</strong> '
-                    '<span style="color:#333333;">' + issue.message + '</span>'
-                    '<br><small style="color:#888;">BT : ' + issue.bt + ' · ' + issue.source + '</small>'
-                    '</div>'
+                st.markdown(
+                    f'<div style="background:#fff0f0;border-left:4px solid #c0392b;'
+                    f'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    f'❌ <strong style="color:#c0392b;">[{issue.rule_id}]</strong> '
+                    f'<span style="color:#333;">{issue.message}</span>'
+                    f'<br><small style="color:#888;">BT : {issue.bt} · {issue.source}</small>'
+                    f'</div>',
+                    unsafe_allow_html=True
                 )
-                st.markdown(html, unsafe_allow_html=True)
 
             for issue in ai_result.warnings:
-                html = (
-                    '<div style="background-color:#fffbf0;border-left:4px solid #b8860b;'
-                    'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
-                    '⚠️ <strong style="color:#b8860b;">[' + issue.rule_id + ']</strong> '
-                    '<span style="color:#333333;">' + issue.message + '</span>'
-                    '</div>'
+                st.markdown(
+                    f'<div style="background:#fffbf0;border-left:4px solid #b8860b;'
+                    f'border-radius:6px;padding:10px 16px;margin-bottom:6px;">'
+                    f'⚠️ <strong style="color:#b8860b;">[{issue.rule_id}]</strong> '
+                    f'<span style="color:#333;">{issue.message}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
                 )
-                st.markdown(html, unsafe_allow_html=True)
 
-            with st.expander(f"✅ {len(ai_result.infos)} règles Annexe 7 passées"):
-                for issue in ai_result.infos:
-                    html = (
-                        '<div style="background-color:#f0fff4;border-left:4px solid #1a7a4a;'
-                        'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
-                        '✅ <strong style="color:#1a7a4a;">[' + issue.rule_id + ']</strong> '
-                        '<span style="color:#333333;font-size:0.9rem;">' + issue.message + '</span>'
-                        '</div>'
+            if ai_result.infos:
+                with st.expander(f"✅ {len(ai_result.infos)} règles Annexe 7 conformes"):
+                    for issue in ai_result.infos:
+                        st.markdown(
+                            f'<div style="background:#f0fff4;border-left:4px solid #1a7a4a;'
+                            f'border-radius:6px;padding:8px 16px;margin-bottom:4px;">'
+                            f'✅ <strong style="color:#1a7a4a;">[{issue.rule_id}]</strong> '
+                            f'<span style="color:#333;font-size:.9rem;">{issue.message}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+            with st.expander(f"⏭️ {nb_skipped} règles non testées localement"):
+                skip_schema = [i for i in ai_result.skipped if "Contrôle" in i.message]
+                skip_ppf    = [i for i in ai_result.skipped if "Contrôle" not in i.message]
+
+                if skip_schema:
+                    st.markdown(
+                        f"**✅ {len(skip_schema)} règles déjà couvertes par "
+                        "le Contrôle 1 (EN16931 XSLT)**"
                     )
-                    st.markdown(html, unsafe_allow_html=True)
-
-            with st.expander(f"⏭️ Détail des {nb_skipped} règles ignorées pour cette facture (sur {nb_applicable} dans le périmètre)"):
-                # Séparer les deux types de skip
-                skip_schematron = [i for i in ai_result.skipped if "Contrôle 2" in i.message]
-                skip_ppf        = [i for i in ai_result.skipped if "Contrôle 2" not in i.message]
-
-                if skip_schematron:
-                    st.markdown(f"**✅ {len(skip_schematron)} règles déjà couvertes par le Contrôle 2 (EN16931 XSLT)**")
-                    st.caption("Ces règles sont bien validées — mais par le moteur XSLT officiel CEN, pas ici.")
-                    for issue in skip_schematron:
+                    for issue in skip_schema:
                         st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
 
                 if skip_ppf:
-                    st.markdown(f"**⏭️ {len(skip_ppf)} règles non applicables à cette facture**")
-                    st.caption("Ces règles sont conditionnelles (TypeCode spécifique, catégorie TVA particulière, champ optionnel absent) ou nécessitent un accès PPF/annuaire DGFiP.")
+                    st.markdown(
+                        f"**⏭️ {len(skip_ppf)} règles nécessitant PPF/annuaire DGFiP**"
+                    )
+                    st.caption(
+                        "Non testables en standalone — "
+                        "requièrent un accès à la plateforme de dématérialisation."
+                    )
                     for issue in skip_ppf:
                         st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
-                        
-            st.caption("Source : Annexe 7 — Règles de gestion DGFiP v1.8 (31/10/2025)")
+
+            st.caption(
+                f"Sur {total_rules} règles DGFiP v1.8 : "
+                f"{nb_tested} testables localement, "
+                f"{nb_skipped} nécessitent PPF/annuaire/historique. "
+                f"Syntaxe : {syntax_detect} "
+                f"{'(via mapper UBL → BT)' if syntax_detect == 'UBL' else '(XPath CII natif)'}. "
+                "Source : Annexe 7 DGFiP v1.8 (31/10/2025)"
+            )
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
