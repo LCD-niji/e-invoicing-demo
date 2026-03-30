@@ -1,18 +1,103 @@
 # ═══════════════════════════════════════════
-# IMPORTS (en haut de app.py)
+# CONFIGURATION & IMPORTS
 # ═══════════════════════════════════════════
 
 import streamlit as st
+import datetime
+import json
+from decimal import Decimal
 from pathlib import Path
-from generate_invoice import Invoice, InvoiceLine, Party, Address, PROFILES
-from generate_invoice_ubl import generate_ubl_xml
-from generate_pdf import render_invoice_pdf
-from generate_facturx import build_facturx, extract_xml_from_facturx
-from validate_invoice import InvoiceValidator
-from schematron_validator import validate_en16931, detect_syntax, SchematronResult
-from rules_engine.ai_validator import AiValidator
-from convert_legacy import extract_from_xml, make_sample_legacy_xml, ExtractionResult
 
+from generate_invoice    import Invoice, InvoiceLine, Party, Address, PROFILES
+from generate_invoice_ubl import generate_ubl_xml
+from generate_pdf        import render_invoice_pdf
+from generate_facturx    import build_facturx, extract_xml_from_facturx
+from schematron_validator import validate_en16931, detect_syntax
+from rules_engine.ai_validator import AiValidator
+from convert_legacy      import extract_from_xml, make_sample_legacy_xml, ExtractionResult
+
+# ── Page config ───────────────────────────────────────────
+st.set_page_config(
+    page_title="Facturation Électronique 2026",
+    page_icon="🧾",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# ── Titre ─────────────────────────────────────────────────
+st.title("🧾 Démo Facturation Électronique 2026")
+st.caption(
+    "Outil de démonstration Niji — Génération, validation et conversion "
+    "de factures électroniques conformes à la réforme 2026 (EN16931, Factur-X, UBL 2.1)"
+)
+
+# ═══════════════════════════════════════════
+# CRÉATION DES TABS  ← obligatoire avant tout with tab1/tab2/...
+# ═══════════════════════════════════════════
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📝 Générer une facture",
+    "✅ Valider",
+    "🔄 Conversion XML Legacy",
+    "📡 Dépôt Chorus Pro",
+    "ℹ️ À propos",
+])
+
+# ═══════════════════════════════════════════
+# TAB 1 — Génération
+# ═══════════════════════════════════════════
+
+with tab1:
+    # ... tout le code Tab 1 ...
+
+# ═══════════════════════════════════════════
+# TAB 2 — Validation
+# ═══════════════════════════════════════════
+
+with tab2:
+    # ... tout le code Tab 2 ...
+
+# ═══════════════════════════════════════════
+# TAB 3 — Conversion Legacy
+# ═══════════════════════════════════════════
+
+with tab3:
+    # ... tout le code Tab 3 ...
+
+# ═══════════════════════════════════════════
+# TAB 4 — Chorus Pro
+# ═══════════════════════════════════════════
+
+with tab4:
+    # ... tout le code Tab 4 ...
+
+# ═══════════════════════════════════════════
+# TAB 5 — À propos
+# ═══════════════════════════════════════════
+
+with tab5:
+    st.markdown("""
+    ### 🧾 Démo Facturation Électronique 2026
+
+    Outil pédagogique Niji illustrant la mise en conformité à la réforme française
+    de facturation électronique obligatoire à partir de **2026**.
+
+    #### Formats supportés
+    | Format | Syntaxe | Réseau |
+    |---|---|---|
+    | **Factur-X** | PDF/A-3b + CII embarqué | B2B France, Chorus Pro |
+    | **CII** | UN/CEFACT D22B | Interopérabilité EU |
+    | **UBL 2.1** | OASIS BIS Billing 3.0 | Peppol, ERPs internationaux |
+
+    #### Référentiels de validation
+    - **EN16931** : Norme européenne CEN/TC 434 v1.3.15
+    - **Annexe 7 DGFiP v1.8** : 235 règles de gestion françaises (31/10/2025)
+
+    #### Liens
+    - [GitHub](https://github.com/LCD-niji/e-invoicing-demo)
+    - [Schematron CEN](https://github.com/ConnectingEurope/eInvoicing-EN16931)
+    - [DGFiP — Annexe 7](https://www.impots.gouv.fr)
+    """)
 
 # ═══════════════════════════════════════════
 # TAB 1 — Génération
