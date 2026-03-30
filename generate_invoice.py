@@ -238,8 +238,25 @@ def generate_facturx_xml(invoice: Invoice) -> str:
     _sub(buyer_el, "ram:Name", invoice.buyer.name)
     buyer_id = _sub(buyer_el, "ram:SpecifiedLegalOrganization")
     _sub(buyer_id, "ram:ID", invoice.buyer.siret, {"schemeID": "0002"})
+
+    # TVA acheteur (BT-48) — obligatoire si présente
+    if invoice.buyer.vat_number:                                    
+        buyer_tax = _sub(buyer_el, "ram:SpecifiedTaxRegistration")  
+        _sub(buyer_tax, "ram:ID", invoice.buyer.vat_number,         
+             {"schemeID": "VA"})                                     
+
     _add_address(buyer_el, invoice.buyer.address)
 
+# Référence contrat (BT-12)
+    if invoice.contract_ref:
+        contract = _sub(agreement_h, "ram:ContractReferencedDocument")
+        _sub(contract, "ram:IssuerAssignedID", invoice.contract_ref)
+
+    # Bon de commande (BT-13)
+    if invoice.purchase_order:
+        order = _sub(agreement_h, "ram:BuyerOrderReferencedDocument")
+        _sub(order, "ram:IssuerAssignedID", invoice.purchase_order)
+        
     # 3c. Delivery
     delivery_h = _sub(txn, "ram:ApplicableHeaderTradeDelivery")
     actual = _sub(delivery_h, "ram:ActualDeliverySupplyChainEvent")
