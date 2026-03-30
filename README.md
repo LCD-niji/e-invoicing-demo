@@ -14,7 +14,7 @@
 **À partir du 1er septembre 2026**, toutes les PME françaises devront :
 
 1. **Émettre** des factures électroniques structurées (Factur-X / UBL / CII)
-2. **Recevoir** des factures via une Plateforme de Dématérialisation Partenaire (PDP)
+2. **Recevoir** des factures via une Plateforme de Dématérialisation Partenaire (PA)
 3. **Transmettre** les données de transaction à la DGFiP en temps réel
 
 👉 **85% des PME ne sont pas encore prêtes.** Ce repo montre ce que ça implique concrètement.
@@ -156,7 +156,7 @@ python generate_invoice.py && python validate_invoice.py facture_demo.xml
 Ce repo est la partie visible de l'iceberg. J'accompagne les PME françaises de bout en bout :
 
 - **Audit** de votre système de facturation actuel
-- **Choix** de la solution adaptée (PDP, OD, PPF)
+- **Choix** de la solution adaptée (PA, OD, PPF)
 - **Intégration** dans votre ERP / outil comptable
 - **Formation** de vos équipes
 
