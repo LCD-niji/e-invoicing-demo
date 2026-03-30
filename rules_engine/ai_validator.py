@@ -1,15 +1,8 @@
 """
 rules_engine/ai_validator.py
------------------------------
+----------------------------
 Moteur de validation basé sur rules.json (Annexe 7 DGFiP v1.8).
-Évalue les règles f1:true via une table BT → XPath CII.
-
-Couverture :
-  - Présence     : nœud XPath existe et a une valeur
-  - Format       : SIRET (14 chiffres), TVA FR, date YYYYMMDD, ISO
-  - Codelist     : TypeCode, CategoryCode TVA, CountryID
-  - Conditionnel : TypeCode, catégorie TVA, BT trigger absent
-  - Calcul       : délégués au Schematron CEN (champ "formula" présent)
+Supporte CII (XPath natif) et UBL 2.1 (via bt_override depuis ubl_mapper).
 """
 from __future__ import annotations
 
@@ -106,27 +99,25 @@ CODELISTS: dict[str, set] = {
 
 # ── Patterns de format ─────────────────────────────────────
 FORMAT_CHECKS: dict[str, tuple[str, str]] = {
-    "siret":  (r"^\d{14}$",                "14 chiffres (SIREN 9 + NIC 5)"),
-    "tva_fr": (r"^FR[A-Z0-9]{2}\d{9}$",   "FR + 2 caractères + 9 chiffres"),
-    "date8":  (r"^\d{8}$",                 "Format YYYYMMDD"),
-    "iso3":   (r"^[A-Z]{3}$",              "Code 3 lettres ISO"),
-    "iso2":   (r"^[A-Z]{2}$",              "Code 2 lettres ISO"),
-    "iban":   (r"^[A-Z]{2}\d{2}[A-Z0-9]+$","Format IBAN"),
+    "siret":  (r"^\d{14}$",                 "14 chiffres (SIREN 9 + NIC 5)"),
+    "tva_fr": (r"^FR[A-Z0-9]{2}\d{9}$",    "FR + 2 caractères + 9 chiffres"),
+    "date8":  (r"^\d{8}$",                  "Format YYYYMMDD"),
+    "iso3":   (r"^[A-Z]{3}$",               "Code 3 lettres ISO"),
+    "iso2":   (r"^[A-Z]{2}$",               "Code 2 lettres ISO"),
+    "iban":   (r"^[A-Z]{2}\d{2}[A-Z0-9]+$", "Format IBAN"),
 }
 
 def _detect_format(bt: str, desc: str) -> Optional[str]:
     d = desc.lower()
-    if bt in ("BT-30", "BT-47") or "siret" in d:      return "siret"
+    if bt in ("BT-30", "BT-47") or "siret" in d:           return "siret"
     if bt in ("BT-31", "BT-48") or ("tva" in d and "fr" in d): return "tva_fr"
-    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):     return "date8"
-    if bt in ("BT-5",):                                return "iso3"
-    if bt in ("BT-40", "BT-55"):                       return "iso2"
-    if bt in ("BT-84",) or "iban" in d:                return "iban"
+    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):          return "date8"
+    if bt in ("BT-5",):                                     return "iso3"
+    if bt in ("BT-40", "BT-55"):                            return "iso2"
+    if bt in ("BT-84",) or "iban" in d:                     return "iban"
     return None
 
 # ── Tables de conditions ───────────────────────────────────
-
-# Règle applicable seulement si ce BT est présent dans la facture
 SKIP_IF_BT_ABSENT: dict[str, str] = {
     "BR-55":    "BT-25",
     "BR-29":    "BT-73",
@@ -136,12 +127,10 @@ SKIP_IF_BT_ABSENT: dict[str, str] = {
     "BR-CL-22": "BT-121",
 }
 
-# Règle applicable seulement si TypeCode est dans l'ensemble
 SKIP_IF_NOT_TYPE: dict[str, set] = {
     "G1.31": {"381", "384"},
 }
 
-# Règle applicable seulement si BT-118 = valeur spécifique
 SKIP_IF_VAT_NOT: dict[str, str] = {
     "G1.41":    "E",
     "BR-AE-10": "AE",
@@ -150,12 +139,10 @@ SKIP_IF_VAT_NOT: dict[str, str] = {
     "BR-S-10":  "S",
 }
 
-# Règles inversées : le BT ne doit PAS être présent
-INVERT_CHECK: set[str] = {
-    "BR-S-10",
-}
+INVERT_CHECK: set[str] = {"BR-S-10"}
 
 
+# ── Structures de résultat ─────────────────────────────────
 @dataclass
 class AiIssue:
     rule_id:  str
@@ -163,7 +150,6 @@ class AiIssue:
     severity: str   # ERROR | WARNING | INFO | SKIPPED
     bt:       str = ""
     source:   str = "Annexe 7 DGFiP v1.8"
-
 
 @dataclass
 class AiResult:
@@ -209,34 +195,63 @@ class AiValidator:
         except Exception:
             return None
 
-    def validate(self, xml_path: str, schematron_ran: bool = False) -> AiResult:
+    def validate(
+        self,
+        xml_path: str,
+        schematron_ran: bool = False,
+        bt_override: dict | None = None,   # ← NOUVEAU : valeurs BT pré-extraites (UBL)
+    ) -> AiResult:
+        """
+        Valide un XML CII ou UBL 2.1 contre les règles Annexe 7 DGFiP.
+
+        Args:
+            xml_path       : chemin vers le fichier XML
+            schematron_ran : True si Contrôle 1 (Schematron CEN) déjà exécuté
+            bt_override    : dict {bt_code: valeur} depuis ubl_mapper (UBL 2.1)
+                             Si fourni, prioritaire sur XPath CII pour ces BT.
+        """
         result = AiResult()
+
         try:
             tree = etree.parse(xml_path)
         except Exception as e:
             result.issues.append(AiIssue("PARSE-ERR", f"XML invalide : {e}", "ERROR"))
             return result
 
-        type_code = self._get_value(tree, BT_XPATH.get("BT-3",  "")) or ""
-        vat_code  = self._get_value(tree, BT_XPATH.get("BT-118","")) or ""
+        # ── Fonction centrale de résolution d'un BT ───────
+        def _get(bt_code: str) -> Optional[str]:
+            """
+            Retourne la valeur d'un BT :
+            1. Depuis bt_override si disponible (UBL)
+            2. Depuis XPath CII sinon
+            """
+            if bt_override and bt_code in bt_override:
+                return bt_override[bt_code] or None
+            xpath = BT_XPATH.get(bt_code, "")
+            return self._get_value(tree, xpath)
 
+        # ── Valeurs contextuelles ──────────────────────────
+        type_code = _get("BT-3")  or ""
+        vat_code  = _get("BT-118") or ""
+
+        # ── Boucle sur les règles actives ──────────────────
         for rule in self.rules:
-            rule_id   = rule.get("id", "?")
-            desc      = rule.get("desc", "")
-            bt_raw    = rule.get("bt", "")
-            category  = rule.get("source", "Annexe 7 DGFiP v1.8")
-            severity  = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
-            covered   = rule.get("covered_by", "")
+            rule_id  = rule.get("id", "?")
+            desc     = rule.get("desc", "")
+            bt_raw   = rule.get("bt", "")
+            category = rule.get("source", "Annexe 7 DGFiP v1.8")
+            severity = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
+            covered  = rule.get("covered_by", "")
 
-            # ── Doublon XSLT — skipper si Contrôle 2 déjà exécuté ──
+            # ── Doublon XSLT ───────────────────────────────
             if schematron_ran and covered == "schematron":
                 result.issues.append(AiIssue(
                     rule_id=rule_id,
-                    message=f"{desc} (déjà vérifiée par Contrôle 2 — EN16931 XSLT)",
+                    message=f"{desc} (déjà vérifiée par Contrôle 1 — EN16931 XSLT)",
                     severity="SKIPPED", bt=bt_raw
                 ))
                 continue
-            
+
             # ── Condition TypeCode ─────────────────────────
             if rule_id in SKIP_IF_NOT_TYPE:
                 if type_code not in SKIP_IF_NOT_TYPE[rule_id]:
@@ -259,8 +274,10 @@ class AiValidator:
 
             # ── BT non mappé ───────────────────────────────
             bt = bt_raw.split(",")[0].strip()
-            xpath = BT_XPATH.get(bt, "")
-            if not xpath:
+            has_override = bt_override and bt in bt_override
+            has_xpath    = bt in BT_XPATH
+
+            if not has_override and not has_xpath:
                 result.issues.append(AiIssue(
                     rule_id=rule_id,
                     message=f"{desc} (BT non mappé — vérification PPF/annuaire)",
@@ -270,16 +287,17 @@ class AiValidator:
 
             # ── Condition BT trigger absent ────────────────
             if rule_id in SKIP_IF_BT_ABSENT:
-                trigger_xpath = BT_XPATH.get(SKIP_IF_BT_ABSENT[rule_id], "")
-                if not self._get_value(tree, trigger_xpath):
+                trigger_bt    = SKIP_IF_BT_ABSENT[rule_id]
+                trigger_value = _get(trigger_bt)
+                if not trigger_value:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
-                        message=f"{desc} (non applicable — {SKIP_IF_BT_ABSENT[rule_id]} absent)",
+                        message=f"{desc} (non applicable — {trigger_bt} absent)",
                         severity="SKIPPED", bt=bt_raw
                     ))
                     continue
 
-            value = self._get_value(tree, xpath)
+            value = _get(bt)
 
             # ── Check inversé ──────────────────────────────
             if rule_id in INVERT_CHECK:
