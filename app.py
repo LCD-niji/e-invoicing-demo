@@ -78,7 +78,7 @@ with tab1:
                 st.info(
                     "📋 Profil **EN16931** appliqué — seul profil conforme à la réforme 2026.\n\n"
                     "MINIMUM / BASIC_WL / BASIC sont acceptés pour l'**archivage** "
-                    "mais insuffisants pour l'émission vers Chorus Pro ou une PDP."
+                    "mais insuffisants pour l'émission vers Chorus Pro ou une PA."
                 )
                 profile = "EN16931"
     st.divider()
@@ -170,12 +170,19 @@ with tab1:
                 seller=Party(
                     name=seller_name, siret=seller_siret,
                     vat_number=seller_vat, iban=seller_iban, bic=seller_bic,
-                    address=Address(street=seller_street, city=seller_city,
-                                    postal_code=seller_zip, country=seller_country),
+                    address=Address(
+                        street=seller_street,
+                        city=seller_city,
+                        postal_code=seller_zip,
+                        country_code=seller_country,  # ← country → country_code
+                    ),
                 ),
                 buyer=Party(
                     name=buyer_name, siret=buyer_siret,
-                    address=Address(city=buyer_city, country=buyer_country),
+                    address=Address(
+                        city=buyer_city,
+                        country_code=buyer_country,   # ← country → country_code
+                    ),
                 ),
                 lines=[
                     InvoiceLine(
