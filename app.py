@@ -70,18 +70,19 @@ with tab1:
             )
         )
     with col_profile:
-        if "UBL" not in syntax:
-            profile = st.selectbox(
-                "Profil Factur-X",
-                list(PROFILES.keys()),
-                index=3,
-                help="EN16931 est le profil recommandé pour la réforme 2026"
-            )
-        else:
-            profile = "EN16931"
-            st.info("ℹ️ UBL 2.1 utilise le profil **Peppol BIS Billing 3.0** "
-                    "(équivalent EN16931)")
-
+            if "UBL" in syntax:
+                st.info("ℹ️ UBL 2.1 utilise le profil **Peppol BIS Billing 3.0** "
+                        "(équivalent EN16931)")
+                profile = "EN16931"git add app.py
+git commit -m "fix: profil Factur-X fixé à EN16931 (selectbox supprimé)"
+git push
+            else:
+                st.info(
+                    "📋 Profil **EN16931** appliqué — seul profil conforme à la réforme 2026.\n\n"
+                    "MINIMUM / BASIC_WL / BASIC sont acceptés pour l'**archivage** "
+                    "mais insuffisants pour l'émission vers Chorus Pro ou une PDP."
+                )
+                profile = "EN16931"
     st.divider()
 
     # ── Formulaire vendeur ────────────────────────────────
