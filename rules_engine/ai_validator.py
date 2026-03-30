@@ -3,6 +3,12 @@ rules_engine/ai_validator.py
 ----------------------------
 Moteur de validation basé sur rules.json (Annexe 7 DGFiP v1.8).
 Supporte CII (XPath natif) et UBL 2.1 (via bt_override depuis ubl_mapper).
+Couverture :
+  - Présence     : nœud XPath existe et a une valeur
+  - Format       : SIRET (14 chiffres), TVA FR, date YYYYMMDD ou YYYY-MM-DD, ISO
+  - Codelist     : TypeCode, CategoryCode TVA, CountryID
+  - Conditionnel : TypeCode, catégorie TVA, BT trigger absent
+  - Calcul       : délégués au Schematron CEN (champ "formula" présent)
 """
 from __future__ import annotations
 
@@ -98,26 +104,29 @@ CODELISTS: dict[str, set] = {
 }
 
 # ── Patterns de format ─────────────────────────────────────
+# FIX : date accepte YYYYMMDD (CII/Factur-X) ET YYYY-MM-DD (UBL 2.1)
 FORMAT_CHECKS: dict[str, tuple[str, str]] = {
-    "siret":  (r"^\d{14}$",                 "14 chiffres (SIREN 9 + NIC 5)"),
-    "tva_fr": (r"^FR[A-Z0-9]{2}\d{9}$",    "FR + 2 caractères + 9 chiffres"),
-    "date8":  (r"^\d{8}$",                  "Format YYYYMMDD"),
-    "iso3":   (r"^[A-Z]{3}$",               "Code 3 lettres ISO"),
-    "iso2":   (r"^[A-Z]{2}$",               "Code 2 lettres ISO"),
-    "iban":   (r"^[A-Z]{2}\d{2}[A-Z0-9]+$", "Format IBAN"),
+    "siret":  (r"^\d{14}$",                          "14 chiffres (SIREN 9 + NIC 5)"),
+    "tva_fr": (r"^FR[A-Z0-9]{2}\d{9}$",              "FR + 2 caractères + 9 chiffres"),
+    "date8":  (r"^\d{8}$|^\d{4}-\d{2}-\d{2}$",       "Format YYYYMMDD ou YYYY-MM-DD"),
+    "iso3":   (r"^[A-Z]{3}$",                         "Code 3 lettres ISO"),
+    "iso2":   (r"^[A-Z]{2}$",                         "Code 2 lettres ISO"),
+    "iban":   (r"^[A-Z]{2}\d{2}[A-Z0-9]+$",          "Format IBAN"),
 }
 
 def _detect_format(bt: str, desc: str) -> Optional[str]:
     d = desc.lower()
-    if bt in ("BT-30", "BT-47") or "siret" in d:           return "siret"
+    if bt in ("BT-30", "BT-47") or "siret" in d:              return "siret"
     if bt in ("BT-31", "BT-48") or ("tva" in d and "fr" in d): return "tva_fr"
-    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):          return "date8"
-    if bt in ("BT-5",):                                     return "iso3"
-    if bt in ("BT-40", "BT-55"):                            return "iso2"
-    if bt in ("BT-84",) or "iban" in d:                     return "iban"
+    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):             return "date8"
+    if bt in ("BT-5",):                                        return "iso3"
+    if bt in ("BT-40", "BT-55"):                               return "iso2"
+    if bt in ("BT-84",) or "iban" in d:                        return "iban"
     return None
 
 # ── Tables de conditions ───────────────────────────────────
+
+# Règle applicable seulement si ce BT est présent dans la facture
 SKIP_IF_BT_ABSENT: dict[str, str] = {
     "BR-55":    "BT-25",
     "BR-29":    "BT-73",
@@ -125,20 +134,27 @@ SKIP_IF_BT_ABSENT: dict[str, str] = {
     "BR-CO-19": "BT-73",
     "G6.21":    "BT-121",
     "BR-CL-22": "BT-121",
+    "G1.39":    "BT-72",   # conditionnel — seulement si date livraison présente
+    "BR-32":    "BT-95",   # conditionnel — seulement si remise document (BG-20) présente
 }
 
+# Règle applicable seulement si TypeCode est dans l'ensemble
 SKIP_IF_NOT_TYPE: dict[str, set] = {
     "G1.31": {"381", "384"},
 }
 
+# Règle applicable seulement si BT-118 = valeur spécifique
 SKIP_IF_VAT_NOT: dict[str, str] = {
-    "G1.41":    "E",
-    "BR-AE-10": "AE",
-    "BR-G-10":  "G",
-    "BR-IC-10": "K",
-    "BR-S-10":  "S",
+    "G1.41":     "E",
+    "BR-AE-10":  "AE",
+    "BR-G-10":   "G",
+    "BR-IC-10":  "K",
+    "BR-IC-11":  "K",   # intracommunautaire uniquement
+    "BR-IC-12":  "K",   # intracommunautaire uniquement
+    "BR-S-10":   "S",
 }
 
+# Règles inversées : le BT ne doit PAS être présent
 INVERT_CHECK: set[str] = {"BR-S-10"}
 
 
@@ -199,7 +215,7 @@ class AiValidator:
         self,
         xml_path: str,
         schematron_ran: bool = False,
-        bt_override: dict | None = None,   # ← NOUVEAU : valeurs BT pré-extraites (UBL)
+        bt_override: dict | None = None,
     ) -> AiResult:
         """
         Valide un XML CII ou UBL 2.1 contre les règles Annexe 7 DGFiP.
@@ -218,20 +234,15 @@ class AiValidator:
             result.issues.append(AiIssue("PARSE-ERR", f"XML invalide : {e}", "ERROR"))
             return result
 
-        # ── Fonction centrale de résolution d'un BT ───────
+        # ── Résolution d'un BT (bt_override prioritaire sur XPath) ──
         def _get(bt_code: str) -> Optional[str]:
-            """
-            Retourne la valeur d'un BT :
-            1. Depuis bt_override si disponible (UBL)
-            2. Depuis XPath CII sinon
-            """
             if bt_override and bt_code in bt_override:
                 return bt_override[bt_code] or None
             xpath = BT_XPATH.get(bt_code, "")
             return self._get_value(tree, xpath)
 
         # ── Valeurs contextuelles ──────────────────────────
-        type_code = _get("BT-3")  or ""
+        type_code = _get("BT-3")   or ""
         vat_code  = _get("BT-118") or ""
 
         # ── Boucle sur les règles actives ──────────────────
