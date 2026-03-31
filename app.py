@@ -621,7 +621,7 @@ with tab2:
                       "BR-IC-11 si categorie TVA != K (pas intracom.). "
                       "Elles s'activent dans les scenarios concernes.")
             )
-            )
+            
 
             for issue in ai_result.errors:
                 st.markdown(
@@ -709,7 +709,7 @@ with tab2:
                 f" {'(UBL -> BT)' if syntax_detect == 'UBL' else '(XPath CII)'}. "
                 "Source : Annexe 7 DGFiP v1.8 (31/10/2025)."
             )
-            )
+            
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
