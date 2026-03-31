@@ -70,6 +70,35 @@ class InvoiceLine:
         return self.line_total_ht + self.vat_amount
 
 
+# ─────────────────────────────────────────────
+# Codes catégorie d'opération (BT-24 extension FR)
+# Obligatoires à partir du 1er septembre 2026
+# ─────────────────────────────────────────────
+
+OPERATION_CATEGORIES = {
+    "B": "Livraison de biens",
+    "S": "Prestation de services",
+    "M": "Biens et services (mixte)",
+}
+
+# Codes cadre de facturation BT-24 — profil EXTENDED-CTC-FR
+BILLING_FRAMEWORK_CODES = {
+    "B1": "Vente de biens",
+    "S1": "Prestation de services",
+    "M1": "Opération mixte (biens + services)",
+    "B2": "Vente de biens (payée)",
+    "S2": "Prestation de services (payée)",
+    "M2": "Opération mixte (payée)",
+    "B4": "Vente de biens après acompte",
+    "S4": "Prestation de services après acompte",
+    "M4": "Opération mixte après acompte",
+    "B7": "Vente de biens (e-reporting)",
+    "S7": "Prestation de services (e-reporting)",
+    "S5": "Sous-traitance",
+    "S6": "Co-traitance",
+}
+
+
 @dataclass
 class Invoice:
     number: str
@@ -81,8 +110,19 @@ class Invoice:
     currency: str = "EUR"
     profile: str = "EN16931"
     notes: Optional[str] = None
-    contract_ref: Optional[str] = None    
-    purchase_order: Optional[str] = None   
+    contract_ref: Optional[str] = None
+    purchase_order: Optional[str] = None
+
+    # ── Mentions obligatoires au 1er septembre 2026 ──────
+    # Catégorie de l'opération : "B" biens, "S" services, "M" mixte
+    # Obligatoire pour les GE/ETI dès le 01/09/2026,
+    # pour les PME/TPE/micro dès le 01/09/2027.
+    operation_category: Optional[str] = None  # "B", "S" ou "M"
+
+    # Option paiement TVA sur les débits (art. 269 CGI)
+    # True = TVA acquittée à la date de facturation (débit)
+    # False ou None = TVA acquittée à l'encaissement (droit commun services)
+    vat_on_debit: Optional[bool] = None  # BT-8 : code 5 (CII) ou 3 (UBL)
 
     # Calculés automatiquement
     @property
@@ -107,6 +147,25 @@ class Invoice:
             breakdown[rate]["base"] += line.line_total_ht
             breakdown[rate]["vat"] += line.vat_amount
         return breakdown
+
+    def validate_operation_category(self) -> list[str]:
+        """
+        Valide la cohérence de operation_category.
+        Retourne une liste d'avertissements (vide = OK).
+        """
+        warnings = []
+        if self.operation_category is None:
+            warnings.append(
+                "operation_category non renseigné — obligatoire dès le 01/09/2026 "
+                "(GE/ETI) ou 01/09/2027 (PME/TPE/micro). "
+                "Valeurs : 'B' (biens), 'S' (services), 'M' (mixte)."
+            )
+        elif self.operation_category not in OPERATION_CATEGORIES:
+            warnings.append(
+                f"operation_category='{self.operation_category}' invalide. "
+                f"Valeurs autorisées : {list(OPERATION_CATEGORIES.keys())}"
+            )
+        return warnings
 
 
 # ─────────────────────────────────────────────
@@ -191,6 +250,14 @@ def generate_facturx_xml(invoice: Invoice) -> str:
         note = _sub(doc, "ram:IncludedNote")
         _sub(note, "ram:Content", invoice.notes)
 
+    # ── Catégorie d'opération (mention obligatoire 2026) ─
+    # BT-22 avec code sujet AAK — encodée comme note structurée
+    if invoice.operation_category and invoice.operation_category in OPERATION_CATEGORIES:
+        op_note = _sub(doc, "ram:IncludedNote")
+        _sub(op_note, "ram:Content",
+             OPERATION_CATEGORIES[invoice.operation_category])
+        _sub(op_note, "ram:SubjectCode", "AAK")  # UNTDID 4451 : AAK = type d'opération
+
     # ── 3. SupplyChainTradeTransaction ───────────
     txn = _sub(root, "rsm:SupplyChainTradeTransaction")
 
@@ -240,14 +307,16 @@ def generate_facturx_xml(invoice: Invoice) -> str:
     _sub(buyer_id, "ram:ID", invoice.buyer.siret, {"schemeID": "0002"})
 
     # TVA acheteur (BT-48) — obligatoire si présente
-    if invoice.buyer.vat_number:                                    
-        buyer_tax = _sub(buyer_el, "ram:SpecifiedTaxRegistration")  
-        _sub(buyer_tax, "ram:ID", invoice.buyer.vat_number,         
-             {"schemeID": "VA"})                                     
+    if invoice.buyer.vat_number:
+        buyer_tax = _sub(buyer_el, "ram:SpecifiedTaxRegistration")
+        _sub(buyer_tax, "ram:ID", invoice.buyer.vat_number, {"schemeID": "VA"})
 
     _add_address(buyer_el, invoice.buyer.address)
 
-# Référence contrat (BT-12)
+    # FIX : indentation correcte — ces deux blocs étaient
+    # dédentés d'un niveau dans la version précédente,
+    # les faisant flotter hors du bloc agreement_h.
+    # Référence contrat (BT-12)
     if invoice.contract_ref:
         contract = _sub(agreement_h, "ram:ContractReferencedDocument")
         _sub(contract, "ram:IssuerAssignedID", invoice.contract_ref)
@@ -256,7 +325,7 @@ def generate_facturx_xml(invoice: Invoice) -> str:
     if invoice.purchase_order:
         order = _sub(agreement_h, "ram:BuyerOrderReferencedDocument")
         _sub(order, "ram:IssuerAssignedID", invoice.purchase_order)
-        
+
     # 3c. Delivery
     delivery_h = _sub(txn, "ram:ApplicableHeaderTradeDelivery")
     actual = _sub(delivery_h, "ram:ActualDeliverySupplyChainEvent")
@@ -267,6 +336,12 @@ def generate_facturx_xml(invoice: Invoice) -> str:
     # 3d. Settlement
     settlement_h = _sub(txn, "ram:ApplicableHeaderTradeSettlement")
     _sub(settlement_h, "ram:InvoiceCurrencyCode", invoice.currency)
+
+    # ── Option TVA sur les débits (mention obligatoire 2026) ─
+    # BT-8 : code 5 en CII (UNTDID 2475) = paiement à la facturation (débits)
+    # Obligatoire uniquement si le prestataire a opté pour ce régime.
+    if invoice.vat_on_debit is True:
+        _sub(settlement_h, "ram:ApplicableTradeTaxDueDateTypeCode", "5")
 
     # Paiement
     if invoice.seller.iban:
@@ -351,6 +426,9 @@ def make_demo_invoice() -> Invoice:
         buyer=buyer,
         lines=lines,
         notes="Merci pour votre confiance. Paiement par virement SEPA sous 30 jours.",
+        # Mentions obligatoires 2026 — à renseigner selon la nature de la prestation
+        operation_category="S",   # S = prestation de services
+        vat_on_debit=None,         # None = encaissement (droit commun)
     )
 
 
@@ -363,20 +441,35 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="facture_demo.xml", help="Fichier de sortie XML")
     parser.add_argument("--profile", default="EN16931",
                         choices=list(PROFILES.keys()), help="Profil Factur-X")
+    parser.add_argument("--category", default="S",
+                        choices=list(OPERATION_CATEGORIES.keys()),
+                        help="Catégorie opération : B=biens, S=services, M=mixte (obligatoire 2026)")
+    parser.add_argument("--vat-on-debit", action="store_true",
+                        help="Option TVA sur les débits (art. 269 CGI) — obligatoire si applicable 2026")
     args = parser.parse_args()
 
     invoice = make_demo_invoice()
     invoice.profile = args.profile
+    invoice.operation_category = args.category
+    invoice.vat_on_debit = args.vat_on_debit or None
+
+    # Validation des mentions 2026
+    warnings = invoice.validate_operation_category()
+    for w in warnings:
+        print(f"⚠️  {w}")
+
     xml_content = generate_facturx_xml(invoice)
 
     output_path = Path(args.output)
     output_path.write_text(xml_content, encoding="utf-8")
 
     print(f"✅ Facture générée : {output_path}")
-    print(f"   Numéro    : {invoice.number}")
-    print(f"   Vendeur   : {invoice.seller.name}")
-    print(f"   Acheteur  : {invoice.buyer.name}")
-    print(f"   Total HT  : {invoice.total_ht} €")
-    print(f"   TVA       : {invoice.total_vat} €")
-    print(f"   Total TTC : {invoice.total_ttc} €")
-    print(f"   Profil    : {invoice.profile}")
+    print(f"   Numéro            : {invoice.number}")
+    print(f"   Vendeur           : {invoice.seller.name}")
+    print(f"   Acheteur          : {invoice.buyer.name}")
+    print(f"   Total HT          : {invoice.total_ht} €")
+    print(f"   TVA               : {invoice.total_vat} €")
+    print(f"   Total TTC         : {invoice.total_ttc} €")
+    print(f"   Profil            : {invoice.profile}")
+    print(f"   Catégorie op.     : {invoice.operation_category} — {OPERATION_CATEGORIES.get(invoice.operation_category, '?')}")
+    print(f"   TVA sur débits    : {'Oui' if invoice.vat_on_debit else 'Non (encaissement)'}")
