@@ -575,35 +575,52 @@ with tab2:
             nb_hors_scope = len(ai_result.skipped_out_of_scope)
             total_rules   = ai_val.total_f1_rules
 
-            # FIX BUG 4 : 6 colonnes avec séparation explicite des catégories
-            col_a1, col_a2, col_a3, col_a4, col_a5, col_a6 = st.columns(6)
-            col_a1.metric("Statut Annexe 7",
-                          "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME")
+            # 7 colonnes : chaque categorie a sa propre metrique
+            # Invariant visible : total = XSLT + testees + hors_portee + N/A
+            col_a1, col_a2, col_a3, col_a4, col_a5, col_a6, col_a7 = st.columns(7)
+            col_a1.metric(
+                "Statut Annexe 7",
+                "✅ CONFORME" if ai_result.is_valid else "❌ NON CONFORME"
+            )
             col_a2.metric(
-                "Règles f1 applicables",
+                "Regles f1",
                 total_rules,
-                help="Règles DGFiP marquées f1=True (Flux F1). "
-                     "Les règles f1=False sont dans le JSON pour référence uniquement."
+                help=("Regles DGFiP marquees f1=True (Flux F1 — emission B2B). "
+                      "Les regles f1=False sont dans le JSON a titre documentaire "
+                      "et ne sont jamais evaluees.")
             )
             col_a3.metric(
-                "Couvertes par XSLT",
+                "Ctrl 1 (XSLT)",
                 nb_xslt,
-                help="Règles déjà vérifiées par le Contrôle 1 (Schematron CEN EN16931). "
-                     "Elles ne sont pas re-testées ici pour éviter les doublons."
+                help=("Regles deja verifiees par le Controle 1 (Schematron CEN EN16931 v1.3.15). "
+                      "Elles ne sont pas re-evaluees ici pour eviter les doublons. "
+                      "Lancez tag_rules_schematron.py pour activer ce compteur.")
             )
             col_a4.metric(
-                "Testées ici",
+                "Testees ici",
                 nb_tested,
-                help="Règles effectivement évaluées sur cette facture : "
-                     "présence, format, codelist."
+                help=("Regles evaluees sur cette facture : presence des BT, "
+                      "format (SIRET, TVA, dates), codelists (TypeCode, CategoryCode, CountryID).")
             )
-            col_a5.metric("Erreurs", len(ai_result.errors))
+            col_a5.metric(
+                "Erreurs",
+                len(ai_result.errors)
+            )
             col_a6.metric(
-                "Hors portée locale",
+                "Hors portee",
                 nb_hors_scope,
-                help="Règles nécessitant PPF/annuaire DGFiP ou non mappables "
-                     "localement (BG-*, BT-8, BT-21, BT-80, BT-111…). "
-                     f"+ {nb_condition} règles non applicables à cette facture."
+                help=("Regles necessitant PPF/annuaire DGFiP ou dont le BT "
+                      "n'est pas mappable localement (BG-*, BT-8, BT-21, BT-80, BT-111...). "
+                      "Verifiees par la PDP lors du depot reel.")
+            )
+            col_a7.metric(
+                "N/A facture",
+                nb_condition,
+                help=("Regles conditionnelles non applicables a CETTE facture. "
+                      "Ex : BR-55 si TypeCode=380 (pas un avoir), "
+                      "BR-IC-11 si categorie TVA != K (pas intracom.). "
+                      "Elles s'activent dans les scenarios concernes.")
+            )
             )
 
             for issue in ai_result.errors:
@@ -681,16 +698,17 @@ with tab2:
                     for issue in ai_result.skipped_condition:
                         st.markdown(f"— **[{issue.rule_id}]** {issue.message}")
 
-            # FIX BUG 1 : caption avec les vrais chiffres désormais cohérents
+            # Caption = equation : verifiable de tete (ex: 118 = 0 + 58 + 47 + 13)
             st.caption(
-                f"{total_rules} règles f1=True (Flux F1) — "
-                f"{nb_xslt} couvertes par XSLT EN16931, "
-                f"{nb_tested} testées ici ({len(ai_result.errors)} erreur(s)), "
-                f"{nb_hors_scope} hors portée locale, "
-                f"{nb_condition} non applicables à cette facture. "
-                f"Syntaxe : {syntax_detect} "
-                f"{'(via mapper UBL → BT)' if syntax_detect == 'UBL' else '(XPath CII natif)'}. "
+                f"{total_rules} regles f1=True"
+                f" = {nb_xslt} Ctrl1 (XSLT)"
+                f" + {nb_tested} testees ici ({len(ai_result.errors)} erreur(s))"
+                f" + {nb_hors_scope} hors portee"
+                f" + {nb_condition} N/A."
+                f" Syntaxe : {syntax_detect}"
+                f" {'(UBL -> BT)' if syntax_detect == 'UBL' else '(XPath CII)'}. "
                 "Source : Annexe 7 DGFiP v1.8 (31/10/2025)."
+            )
             )
 
 # ═══════════════════════════════════════════
