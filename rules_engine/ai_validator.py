@@ -104,7 +104,6 @@ CODELISTS: dict[str, set] = {
 }
 
 # ── Patterns de format ─────────────────────────────────────
-# FIX : date accepte YYYYMMDD (CII/Factur-X) ET YYYY-MM-DD (UBL 2.1)
 FORMAT_CHECKS: dict[str, tuple[str, str]] = {
     "siret":  (r"^\d{14}$",                          "14 chiffres (SIREN 9 + NIC 5)"),
     "tva_fr": (r"^FR[A-Z0-9]{2}\d{9}$",              "FR + 2 caractères + 9 chiffres"),
@@ -116,17 +115,15 @@ FORMAT_CHECKS: dict[str, tuple[str, str]] = {
 
 def _detect_format(bt: str, desc: str) -> Optional[str]:
     d = desc.lower()
-    if bt in ("BT-30", "BT-47") or "siret" in d:              return "siret"
+    if bt in ("BT-30", "BT-47") or "siret" in d:               return "siret"
     if bt in ("BT-31", "BT-48") or ("tva" in d and "fr" in d): return "tva_fr"
-    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):             return "date8"
-    if bt in ("BT-5",):                                        return "iso3"
-    if bt in ("BT-40", "BT-55"):                               return "iso2"
-    if bt in ("BT-84",) or "iban" in d:                        return "iban"
+    if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):              return "date8"
+    if bt in ("BT-5",):                                         return "iso3"
+    if bt in ("BT-40", "BT-55"):                                return "iso2"
+    if bt in ("BT-84",) or "iban" in d:                         return "iban"
     return None
 
 # ── Tables de conditions ───────────────────────────────────
-
-# Règle applicable seulement si ce BT est présent dans la facture
 SKIP_IF_BT_ABSENT: dict[str, str] = {
     "BR-55":    "BT-25",
     "BR-29":    "BT-73",
@@ -134,38 +131,49 @@ SKIP_IF_BT_ABSENT: dict[str, str] = {
     "BR-CO-19": "BT-73",
     "G6.21":    "BT-121",
     "BR-CL-22": "BT-121",
-    "G1.39":    "BT-72",   # conditionnel — seulement si date livraison présente
-    "BR-32":    "BT-95",   # conditionnel — seulement si remise document (BG-20) présente
+    "G1.39":    "BT-72",
+    "BR-32":    "BT-95",
 }
 
-# Règle applicable seulement si TypeCode est dans l'ensemble
 SKIP_IF_NOT_TYPE: dict[str, set] = {
     "G1.31": {"381", "384"},
 }
 
-# Règle applicable seulement si BT-118 = valeur spécifique
 SKIP_IF_VAT_NOT: dict[str, str] = {
     "G1.41":     "E",
     "BR-AE-10":  "AE",
     "BR-G-10":   "G",
     "BR-IC-10":  "K",
-    "BR-IC-11":  "K",   # intracommunautaire uniquement
-    "BR-IC-12":  "K",   # intracommunautaire uniquement
+    "BR-IC-11":  "K",
+    "BR-IC-12":  "K",
     "BR-S-10":   "S",
 }
 
-# Règles inversées : le BT ne doit PAS être présent
 INVERT_CHECK: set[str] = {"BR-S-10"}
+
+
+# ── Sous-types de SKIPPED ──────────────────────────────────
+# FIX BUG 4 : on catégorise explicitement chaque motif de skip
+# pour ne plus dépendre du texte du message dans app.py
+
+SKIP_REASON_XSLT       = "xslt"      # déjà couverte par Contrôle 1 (Schematron CEN)
+SKIP_REASON_BT_ABSENT  = "bt_absent" # BT non mappé dans BT_XPATH → nécessite PPF
+SKIP_REASON_CONDITION  = "condition" # condition métier non remplie sur cette facture
+SKIP_REASON_PPF        = "ppf"       # nécessite annuaire / historique PPF
 
 
 # ── Structures de résultat ─────────────────────────────────
 @dataclass
 class AiIssue:
-    rule_id:  str
-    message:  str
-    severity: str   # ERROR | WARNING | INFO | SKIPPED
-    bt:       str = ""
-    source:   str = "Annexe 7 DGFiP v1.8"
+    rule_id:     str
+    message:     str
+    severity:    str            # ERROR | WARNING | INFO | SKIPPED
+    bt:          str = ""
+    source:      str = "Annexe 7 DGFiP v1.8"
+    # FIX BUG 4 : sous-type explicite pour les SKIPPED
+    # Valeurs : None (non skippé), "xslt", "bt_absent", "condition", "ppf"
+    skip_reason: Optional[str] = None
+
 
 @dataclass
 class AiResult:
@@ -179,13 +187,32 @@ class AiResult:
     def infos(self)    -> list[AiIssue]: return [i for i in self.issues if i.severity == "INFO"]
     @property
     def skipped(self)  -> list[AiIssue]: return [i for i in self.issues if i.severity == "SKIPPED"]
+
+    # ── Accesseurs par sous-type de SKIPPED ───────────────
+    @property
+    def skipped_xslt(self) -> list[AiIssue]:
+        """Règles déjà couvertes par le Contrôle 1 (Schematron CEN EN16931)."""
+        return [i for i in self.skipped if i.skip_reason == SKIP_REASON_XSLT]
+
+    @property
+    def skipped_condition(self) -> list[AiIssue]:
+        """Règles non applicables à cette facture (TypeCode, TVA, BT trigger)."""
+        return [i for i in self.skipped if i.skip_reason == SKIP_REASON_CONDITION]
+
+    @property
+    def skipped_out_of_scope(self) -> list[AiIssue]:
+        """Règles hors portée standalone : BT absent du mapping ou nécessite PPF."""
+        return [i for i in self.skipped
+                if i.skip_reason in (SKIP_REASON_BT_ABSENT, SKIP_REASON_PPF)]
+
     @property
     def is_valid(self) -> bool: return len(self.errors) == 0
 
 
 class AiValidator:
 
-    def __init__(self, rules_path: Path = DEFAULT_RULES):
+    def __init__(self, rules_path = DEFAULT_RULES):
+        rules_path = Path(rules_path)
         if not rules_path.exists():
             raise FileNotFoundError(f"rules.json introuvable : {rules_path}")
         with open(rules_path, encoding="utf-8") as f:
@@ -198,6 +225,13 @@ class AiValidator:
                 for rule in val:
                     if rule.get("f1", False):
                         self.rules.append(rule)
+
+    # ── FIX BUG 1 : méthode exposée pour que app.py puisse
+    # obtenir le vrai total f1=True sans re-parser le JSON ──
+    @property
+    def total_f1_rules(self) -> int:
+        """Nombre de règles f1=True effectivement chargées."""
+        return len(self.rules)
 
     def _get_value(self, tree, xpath: str) -> Optional[str]:
         if not xpath:
@@ -217,15 +251,6 @@ class AiValidator:
         schematron_ran: bool = False,
         bt_override: dict | None = None,
     ) -> AiResult:
-        """
-        Valide un XML CII ou UBL 2.1 contre les règles Annexe 7 DGFiP.
-
-        Args:
-            xml_path       : chemin vers le fichier XML
-            schematron_ran : True si Contrôle 1 (Schematron CEN) déjà exécuté
-            bt_override    : dict {bt_code: valeur} depuis ubl_mapper (UBL 2.1)
-                             Si fourni, prioritaire sur XPath CII pour ces BT.
-        """
         result = AiResult()
 
         try:
@@ -234,18 +259,15 @@ class AiValidator:
             result.issues.append(AiIssue("PARSE-ERR", f"XML invalide : {e}", "ERROR"))
             return result
 
-        # ── Résolution d'un BT (bt_override prioritaire sur XPath) ──
         def _get(bt_code: str) -> Optional[str]:
             if bt_override and bt_code in bt_override:
                 return bt_override[bt_code] or None
             xpath = BT_XPATH.get(bt_code, "")
             return self._get_value(tree, xpath)
 
-        # ── Valeurs contextuelles ──────────────────────────
         type_code = _get("BT-3")   or ""
         vat_code  = _get("BT-118") or ""
 
-        # ── Boucle sur les règles actives ──────────────────
         for rule in self.rules:
             rule_id  = rule.get("id", "?")
             desc     = rule.get("desc", "")
@@ -254,36 +276,44 @@ class AiValidator:
             severity = "ERROR" if rule_id.startswith(("BR-", "G")) else "WARNING"
             covered  = rule.get("covered_by", "")
 
-            # ── Doublon XSLT ───────────────────────────────
+            # ── FIX BUG 4 : SKIP avec sous-type explicite ──
+
+            # Chemin 1 : déjà couverte par Schematron CEN
             if schematron_ran and covered == "schematron":
                 result.issues.append(AiIssue(
                     rule_id=rule_id,
-                    message=f"{desc} (déjà vérifiée par Contrôle 1 — EN16931 XSLT)",
-                    severity="SKIPPED", bt=bt_raw
+                    message=f"{desc} — couverte par Contrôle 1 (EN16931 XSLT)",
+                    severity="SKIPPED",
+                    bt=bt_raw,
+                    skip_reason=SKIP_REASON_XSLT,
                 ))
                 continue
 
-            # ── Condition TypeCode ─────────────────────────
+            # Chemin 2 : condition TypeCode non satisfaite
             if rule_id in SKIP_IF_NOT_TYPE:
                 if type_code not in SKIP_IF_NOT_TYPE[rule_id]:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
-                        message=f"{desc} (non applicable — TypeCode={type_code or '?'})",
-                        severity="SKIPPED", bt=bt_raw
+                        message=f"{desc} — non applicable (TypeCode={type_code or '?'})",
+                        severity="SKIPPED",
+                        bt=bt_raw,
+                        skip_reason=SKIP_REASON_CONDITION,
                     ))
                     continue
 
-            # ── Condition catégorie TVA ────────────────────
+            # Chemin 3 : condition catégorie TVA non satisfaite
             if rule_id in SKIP_IF_VAT_NOT:
                 if vat_code != SKIP_IF_VAT_NOT[rule_id]:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
-                        message=f"{desc} (non applicable — BT-118={vat_code or '?'})",
-                        severity="SKIPPED", bt=bt_raw
+                        message=f"{desc} — non applicable (BT-118={vat_code or '?'})",
+                        severity="SKIPPED",
+                        bt=bt_raw,
+                        skip_reason=SKIP_REASON_CONDITION,
                     ))
                     continue
 
-            # ── BT non mappé ───────────────────────────────
+            # Chemin 4 : BT non mappé dans BT_XPATH
             bt = bt_raw.split(",")[0].strip()
             has_override = bt_override and bt in bt_override
             has_xpath    = bt in BT_XPATH
@@ -291,20 +321,24 @@ class AiValidator:
             if not has_override and not has_xpath:
                 result.issues.append(AiIssue(
                     rule_id=rule_id,
-                    message=f"{desc} (BT non mappé — vérification PPF/annuaire)",
-                    severity="SKIPPED", bt=bt_raw
+                    message=f"{desc} — {bt} non mappé localement (vérification PPF/annuaire)",
+                    severity="SKIPPED",
+                    bt=bt_raw,
+                    skip_reason=SKIP_REASON_BT_ABSENT,
                 ))
                 continue
 
-            # ── Condition BT trigger absent ────────────────
+            # Chemin 5 : BT trigger absent sur cette facture
             if rule_id in SKIP_IF_BT_ABSENT:
                 trigger_bt    = SKIP_IF_BT_ABSENT[rule_id]
                 trigger_value = _get(trigger_bt)
                 if not trigger_value:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
-                        message=f"{desc} (non applicable — {trigger_bt} absent)",
-                        severity="SKIPPED", bt=bt_raw
+                        message=f"{desc} — non applicable ({trigger_bt} absent de cette facture)",
+                        severity="SKIPPED",
+                        bt=bt_raw,
+                        skip_reason=SKIP_REASON_CONDITION,
                     ))
                     continue
 
@@ -316,13 +350,13 @@ class AiValidator:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
                         message=f"{desc} — '{bt}' ne doit pas être renseigné",
-                        severity="ERROR", bt=bt_raw, source=category
+                        severity="ERROR", bt=bt_raw, source=category,
                     ))
                 else:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
                         message=f"{desc} ✓ (absent comme attendu)",
-                        severity="INFO", bt=bt_raw, source=category
+                        severity="INFO", bt=bt_raw, source=category,
                     ))
                 continue
 
@@ -331,18 +365,18 @@ class AiValidator:
                 if not value:
                     result.issues.append(AiIssue(
                         rule_id=rule_id, message=desc,
-                        severity="ERROR", bt=bt_raw, source=category
+                        severity="ERROR", bt=bt_raw, source=category,
                     ))
                 elif value not in CODELISTS[bt]:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
                         message=f"{desc} — valeur '{value}' non autorisée",
-                        severity="ERROR", bt=bt_raw, source=category
+                        severity="ERROR", bt=bt_raw, source=category,
                     ))
                 else:
                     result.issues.append(AiIssue(
                         rule_id=rule_id, message=f"{desc} ✓ ({value})",
-                        severity="INFO", bt=bt_raw, source=category
+                        severity="INFO", bt=bt_raw, source=category,
                     ))
                 continue
 
@@ -354,12 +388,12 @@ class AiValidator:
                     result.issues.append(AiIssue(
                         rule_id=rule_id,
                         message=f"{desc} — format invalide : '{value}' ({hint})",
-                        severity="WARNING", bt=bt_raw, source=category
+                        severity="WARNING", bt=bt_raw, source=category,
                     ))
                 else:
                     result.issues.append(AiIssue(
                         rule_id=rule_id, message=f"{desc} ✓ ({value})",
-                        severity="INFO", bt=bt_raw, source=category
+                        severity="INFO", bt=bt_raw, source=category,
                     ))
                 continue
 
@@ -367,12 +401,12 @@ class AiValidator:
             if not value:
                 result.issues.append(AiIssue(
                     rule_id=rule_id, message=desc,
-                    severity=severity, bt=bt_raw, source=category
+                    severity=severity, bt=bt_raw, source=category,
                 ))
             else:
                 result.issues.append(AiIssue(
                     rule_id=rule_id, message=f"{desc} ✓",
-                    severity="INFO", bt=bt_raw, source=category
+                    severity="INFO", bt=bt_raw, source=category,
                 ))
 
         return result
