@@ -18,6 +18,9 @@ from schematron_validator import validate_en16931, detect_syntax
 from rules_engine.ai_validator import AiValidator
 from convert_legacy      import extract_from_xml, make_sample_legacy_xml, ExtractionResult
 from send_chorus         import simulate_submission, simulate_status_progression, CHORUS_STATUS
+from invoice_payload     import build_invoice_from_form, get_preloaded_examples
+from validation_explainability import explain_issue_plain_language, remediation_guidance
+from xml_import_helpers import decode_uploaded_xml, parse_xml_safely
 
 
 
@@ -54,6 +57,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 with tab1:
     st.subheader("Génération d'une facture électronique")
+    preloaded_example = get_preloaded_examples()["PME Services FR"]
 
     # ── Sélecteur syntaxe + profil ────────────────────────
     col_syntax, col_profile = st.columns(2)
@@ -87,16 +91,16 @@ with tab1:
     st.markdown("#### 🏢 Vendeur")
     col1, col2 = st.columns(2)
     with col1:
-        seller_name   = st.text_input("Raison sociale",   "Acme Conseil SAS")
-        seller_siret  = st.text_input("SIRET",            "12345678901234")
-        seller_vat    = st.text_input("N° TVA",           "FR12345678901")
-        seller_iban   = st.text_input("IBAN",             "FR7630006000011234567890189")
-        seller_bic    = st.text_input("BIC",              "BNPAFRPP")
+        seller_name   = st.text_input("Raison sociale",   preloaded_example["seller_name"])
+        seller_siret  = st.text_input("SIRET",            preloaded_example["seller_siret"])
+        seller_vat    = st.text_input("N° TVA",           preloaded_example["seller_vat"])
+        seller_iban   = st.text_input("IBAN",             preloaded_example["seller_iban"])
+        seller_bic    = st.text_input("BIC",              preloaded_example["seller_bic"])
     with col2:
-        seller_street = st.text_input("Rue",              "12 rue de la Paix")
-        seller_city   = st.text_input("Ville",            "Paris")
-        seller_zip    = st.text_input("Code postal",      "75001")
-        seller_country= st.text_input("Pays (ISO)",       "FR")
+        seller_street = st.text_input("Rue",              preloaded_example["seller_street"])
+        seller_city   = st.text_input("Ville",            preloaded_example["seller_city"])
+        seller_zip    = st.text_input("Code postal",      preloaded_example["seller_zip"])
+        seller_country= st.text_input("Pays (ISO)",       preloaded_example["seller_country"])
 
     st.divider()
 
@@ -105,14 +109,14 @@ with tab1:
     # Formulaire acheteur
     col3, col4 = st.columns(2)
     with col3:
-        buyer_name    = st.text_input("Raison sociale",  "Dupont Industries SARL", key="buyer_name")
-        buyer_siret   = st.text_input("SIRET",           "98765432109876",          key="buyer_siret")
-        buyer_vat     = st.text_input("N° TVA",          "FR98765432109",           key="buyer_vat")  # ← AJOUT
-        buyer_street  = st.text_input("Rue",             "5 avenue de la Gare",     key="buyer_street")
+        buyer_name    = st.text_input("Raison sociale",  preloaded_example["buyer_name"], key="buyer_name")
+        buyer_siret   = st.text_input("SIRET",           preloaded_example["buyer_siret"], key="buyer_siret")
+        buyer_vat     = st.text_input("N° TVA",          preloaded_example["buyer_vat"], key="buyer_vat")
+        buyer_street  = st.text_input("Rue",             preloaded_example["buyer_street"], key="buyer_street")
     with col4:
-        buyer_zip     = st.text_input("Code postal",     "69001",                   key="buyer_zip")
-        buyer_city    = st.text_input("Ville",           "Lyon",                    key="buyer_city")
-        buyer_country = st.text_input("Pays (ISO)",      "FR",                      key="buyer_country")
+        buyer_zip     = st.text_input("Code postal",     preloaded_example["buyer_zip"], key="buyer_zip")
+        buyer_city    = st.text_input("Ville",           preloaded_example["buyer_city"], key="buyer_city")
+        buyer_country = st.text_input("Pays (ISO)",      preloaded_example["buyer_country"], key="buyer_country")
 
     st.divider()
 
@@ -120,16 +124,16 @@ with tab1:
     st.markdown("#### 📋 Entête")
     col5, col6, col7 = st.columns(3)
     with col5:
-        invoice_number = st.text_input("Numéro", "FAC-2026-001")
+        invoice_number = st.text_input("Numéro", preloaded_example["invoice_number"])
         import datetime
         issue_date = st.date_input("Date d'émission", datetime.date.today())
     with col6:
         due_date    = st.date_input("Date d'échéance",
                                     datetime.date.today() + datetime.timedelta(days=30))
-        notes       = st.text_input("Note / objet", "")
+        notes       = st.text_input("Note / objet", preloaded_example["notes"])
     with col7:
-        contract_ref = st.text_input("Réf. contrat (BT-12)", "")
-        purchase_order = st.text_input("Bon de commande (BT-13)", "")
+        contract_ref = st.text_input("Réf. contrat (BT-12)", preloaded_example["contract_ref"])
+        purchase_order = st.text_input("Bon de commande (BT-13)", preloaded_example["purchase_order"])
 
     st.divider()
 
@@ -161,43 +165,39 @@ with tab1:
     # ── Bouton génération ─────────────────────────────────
     if st.button("🔧 Générer la facture", type="primary", use_container_width=True):
         try:
-            invoice = Invoice(
-                number=invoice_number,
+            form_data = {
+                "seller_name": seller_name,
+                "seller_siret": seller_siret,
+                "seller_vat": seller_vat,
+                "seller_iban": seller_iban,
+                "seller_bic": seller_bic,
+                "seller_street": seller_street,
+                "seller_city": seller_city,
+                "seller_zip": seller_zip,
+                "seller_country": seller_country,
+                "buyer_name": buyer_name,
+                "buyer_siret": buyer_siret,
+                "buyer_vat": buyer_vat,
+                "buyer_street": buyer_street,
+                "buyer_zip": buyer_zip,
+                "buyer_city": buyer_city,
+                "buyer_country": buyer_country,
+                "invoice_number": invoice_number,
+                "notes": notes,
+                "contract_ref": contract_ref,
+                "purchase_order": purchase_order,
+            }
+            invoice, missing_messages = build_invoice_from_form(
+                form_data=form_data,
+                lines_data=lines_data,
                 issue_date=issue_date,
                 due_date=due_date,
-                notes=notes,
-                contract_ref=contract_ref,
-                purchase_order=purchase_order,
                 profile=profile,
-                seller=Party(
-                    name=seller_name, siret=seller_siret,
-                    vat_number=seller_vat, iban=seller_iban, bic=seller_bic,
-                    address=Address(
-                        street=seller_street,
-                        city=seller_city,
-                        postal_code=seller_zip,
-                        country_code=seller_country,  # ← country → country_code
-                    ),
-                ),
-                buyer=Party(
-                    name=buyer_name,
-                    siret=buyer_siret,
-                    vat_number=buyer_vat,     # ← AJOUT
-                    address=Address(
-                        street=buyer_street,
-                        city=buyer_city,
-                        postal_code=buyer_zip,
-                        country_code=buyer_country,
-                    ),
-                ),
-                lines=[
-                    InvoiceLine(
-                        description=d, quantity=Decimal(str(q)),
-                        unit_price=Decimal(str(p)), vat_rate=Decimal(str(v))
-                    )
-                    for d, q, p, v in lines_data
-                ],
             )
+            if missing_messages:
+                for msg in missing_messages:
+                    st.error(f"❌ {msg}")
+                st.stop()
 
             # ── UBL 2.1 ───────────────────────────────────
             if "UBL" in syntax:
@@ -287,6 +287,7 @@ with tab2:
 
     xml_to_validate = None
     syntax_detect   = st.session_state.get("xml_syntax", "CII")
+    import_mapping_issue_count = 0
 
     # ── Source 1 : session ────────────────────────────────
     if xml_source == "Facture générée ci-dessus":
@@ -307,15 +308,19 @@ with tab2:
         )
         if uploaded:
             content = uploaded.read()
-            try:
-                xml_to_validate = content.decode("utf-8-sig")
-            except UnicodeDecodeError:
-                xml_to_validate = content.decode("latin-1")
+            xml_to_validate, _ = decode_uploaded_xml(content)
 
-            # Auto-détection syntaxe
-            syntax_detect = detect_syntax(xml_to_validate)
-            badge = "UBL 2.1" if syntax_detect == "UBL" else "CII"
-            st.info(f"📄 Format détecté : **{badge}**")
+            xml_is_valid, parse_error_message = parse_xml_safely(xml_to_validate)
+            if not xml_is_valid:
+                st.error(f"❌ Erreur de parsing XML : {parse_error_message}")
+                xml_to_validate = None
+
+            if xml_to_validate:
+                # Auto-détection syntaxe
+                syntax_detect = detect_syntax(xml_to_validate)
+                badge = "UBL 2.1" if syntax_detect == "UBL" else "CII"
+                st.info(f"📄 Format détecté : **{badge}**")
+                import_mapping_issue_count = int(st.session_state.get("legacy_unmapped_count", 0))
 
             if "CrossIndustryInvoice" not in xml_to_validate and \
                "oasis" not in xml_to_validate and \
@@ -384,6 +389,9 @@ with tab2:
     if xml_to_validate and st.button(
         "🔍 Valider la facture", type="primary", use_container_width=True
     ):
+        st.session_state["last_validation_summary"] = None
+        st.session_state["last_validation_blocking_count"] = None
+        st.session_state["last_validation_trigger"] = time.time()
         tmp_path = "/tmp/facture_validation.xml"
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(xml_to_validate)
@@ -709,7 +717,92 @@ with tab2:
                 f" {'(UBL -> BT)' if syntax_detect == 'UBL' else '(XPath CII)'}. "
                 "Source : Annexe 7 DGFiP v1.8 (31/10/2025)."
             )
-            
+
+        # ══════════════════════════════════════════════════
+        # SYNTHÈSE UNIFIÉE (create/import même sémantique)
+        # ══════════════════════════════════════════════════
+        unified_blocking = []
+        unified_warning = []
+        unified_info = []
+
+        for issue in (sch_result.errors if sch_result else []):
+            unified_blocking.append(("EN16931", issue.rule_id, issue.message))
+        for issue in (sch_result.warnings if sch_result else []):
+            unified_warning.append(("EN16931", issue.rule_id, issue.message))
+
+        if ai_result:
+            for issue in ai_result.errors:
+                unified_blocking.append(("Annexe 7", issue.rule_id, issue.message))
+            for issue in ai_result.warnings:
+                unified_warning.append(("Annexe 7", issue.rule_id, issue.message))
+            for issue in ai_result.infos:
+                unified_info.append(("Annexe 7", issue.rule_id, issue.message))
+
+        st.divider()
+        st.markdown("#### 🧭 Statut global unifié")
+        global_status = "✅ VALIDE" if len(unified_blocking) == 0 else "❌ CORRECTIONS REQUISES"
+        st.metric("Statut global", global_status)
+        st.caption(
+            "Déclenchement explicite confirmé : 1 clic sur 'Valider la facture' = 1 exécution de validation."
+        )
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Blocking", len(unified_blocking), help="Erreurs bloquantes à corriger")
+        c2.metric("Warning", len(unified_warning), help="Anomalies non bloquantes à surveiller")
+        c3.metric("Info", len(unified_info), help="Informations ou conformités détectées")
+
+        previous_blocking = st.session_state.get("last_validation_blocking_count")
+        if previous_blocking is not None:
+            if len(unified_blocking) < previous_blocking:
+                st.success(
+                    f"Amelioration detectee: blocking {previous_blocking} -> {len(unified_blocking)}."
+                )
+            elif len(unified_blocking) > previous_blocking:
+                st.warning(
+                    f"Nouvelle execution: blocking {previous_blocking} -> {len(unified_blocking)} (degradation)."
+                )
+            else:
+                st.info(
+                    f"Nouvelle execution: blocking inchange ({len(unified_blocking)})."
+                )
+
+        if unified_blocking:
+            with st.expander(f"❌ {len(unified_blocking)} blocking"):
+                for source, rule_id, message in unified_blocking:
+                    st.markdown(f"- **[{source}] [{rule_id}]** {message}")
+                    st.caption(f"Explication: {explain_issue_plain_language(rule_id, message, 'blocking')}")
+                    st.info(f"Action recommandee: {remediation_guidance(rule_id, message)}")
+        if unified_warning:
+            with st.expander(f"⚠️ {len(unified_warning)} warning"):
+                for source, rule_id, message in unified_warning:
+                    st.markdown(f"- **[{source}] [{rule_id}]** {message}")
+                    st.caption(f"Explication: {explain_issue_plain_language(rule_id, message, 'warning')}")
+        if unified_info:
+            with st.expander(f"ℹ️ {len(unified_info)} info"):
+                for source, rule_id, message in unified_info:
+                    st.markdown(f"- **[{source}] [{rule_id}]** {message}")
+                    st.caption(f"Explication: {explain_issue_plain_language(rule_id, message, 'info')}")
+
+        if not unified_blocking:
+            st.success("Aucun point bloquant détecté. Vous pouvez poursuivre le flux sans correction obligatoire.")
+        else:
+            st.warning("Des points bloquants sont présents. Corrigez-les puis relancez la validation.")
+
+        if xml_source == "Uploader un fichier XML (CII ou UBL)":
+            st.markdown("#### 🔀 Séparation des catégories d'issues")
+            st.info(
+                f"Issues de mapping (import): {import_mapping_issue_count} | "
+                f"Issues de validation (EN16931 + Annexe 7): {len(unified_blocking) + len(unified_warning)}"
+            )
+
+        st.session_state["last_validation_blocking_count"] = len(unified_blocking)
+        st.session_state["last_validation_summary"] = {
+            "blocking": len(unified_blocking),
+            "warning": len(unified_warning),
+            "info": len(unified_info),
+            "timestamp": st.session_state["last_validation_trigger"],
+        }
+
 
 # ═══════════════════════════════════════════
 # TAB 3 — Dépôt Chorus Pro
@@ -853,6 +946,10 @@ with tab5:
             st.code("\n".join(legacy_xml_content.split("\n")[:60]), language="xml")
 
         # Extraction heuristique
+        legacy_xml_valid, legacy_parse_message = parse_xml_safely(legacy_xml_content)
+        if not legacy_xml_valid:
+            st.error(f"❌ Erreur de parsing XML legacy : {legacy_parse_message}")
+            st.stop()
         try:
             extracted = extract_from_xml(legacy_xml_content)
         except ValueError as e:
@@ -881,6 +978,23 @@ with tab5:
                 with st.expander(f"⚠️ {len(extracted.unmatched_tags)} tags non reconnus", expanded=False):
                     st.caption("Ces balises n'ont pas pu être mappées automatiquement.")
                     st.write(", ".join(f"`{t}`" for t in sorted(extracted.unmatched_tags)))
+            else:
+                st.success("✅ Tous les tags détectés ont été mappés vers le payload canonique.")
+            st.session_state["legacy_unmapped_count"] = len(extracted.unmatched_tags)
+
+            normalized_payload = extracted.normalized_payload
+            with st.expander("🧩 Payload normalisé (canonique)", expanded=False):
+                st.caption(
+                    "Vue normalisée utilisée par le pipeline interne (mapping -> normalisation -> validation)."
+                )
+                st.json(normalized_payload)
+                st.download_button(
+                    label="⬇️ Télécharger le payload normalisé (.json)",
+                    data=json.dumps(normalized_payload, ensure_ascii=False, indent=2),
+                    file_name="normalized_payload.json",
+                    mime="application/json",
+                    key="download_normalized_payload",
+                )
 
             st.divider()
             st.markdown("#### ✏️ Vérifiez et complétez les données extraites")
