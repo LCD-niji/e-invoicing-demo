@@ -7,9 +7,16 @@ __pycache__/
 *.pyo
 .venv/
 .claude
+.cursor/
+
 
 # Factures de test (XML générés dynamiquement)
 *.xml
 
 # Streamlit
 .streamlit/secrets.toml
+
+#BMAD
+_bmad-output/
+_bmad/
+
