@@ -35,81 +35,304 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      :root {
-        --brand-primary: #0f3d91;
-        --brand-accent: #00a8c6;
-        --surface: #f5f7fb;
-        --surface-card: #ffffff;
-        --text-main: #1f2a44;
-      }
-      .stApp {
-        background: linear-gradient(180deg, #f7f9fd 0%, #eef3fb 100%);
-      }
-      .hero-card {
-        background: linear-gradient(135deg, #0f3d91 0%, #1c5fd1 55%, #00a8c6 100%);
-        border-radius: 16px;
-        padding: 20px 22px;
-        margin: 8px 0 16px 0;
-        color: #ffffff;
-        box-shadow: 0 8px 24px rgba(15, 61, 145, 0.18);
-      }
-      .hero-title {
-        font-size: 1.35rem;
+    /* ═══════════════════════════════════════
+       RESET & BASE
+    ═══════════════════════════════════════ */
+    html, body, [data-testid="stAppViewContainer"] {
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+    }
+
+    /* ═══════════════════════════════════════
+       HEADER PRINCIPAL (masque le header Streamlit par défaut)
+    ═══════════════════════════════════════ */
+    [data-testid="stHeader"] {
+        background: linear-gradient(90deg, #005FAD 0%, #0077CC 100%);
+        height: 3px;
+    }
+
+    /* ═══════════════════════════════════════
+       HERO BANNER
+    ═══════════════════════════════════════ */
+    .hero-banner {
+        background: linear-gradient(135deg, #003D73 0%, #005FAD 60%, #0095D9 100%);
+        border-radius: 14px;
+        padding: 2.2rem 2.5rem;
+        margin-bottom: 1.8rem;
+        color: white;
+        box-shadow: 0 4px 24px rgba(0, 95, 173, 0.18);
+    }
+    .hero-banner h1 {
+        font-size: 1.9rem;
         font-weight: 700;
-        margin-bottom: 6px;
-      }
-      .hero-subtitle {
-        font-size: 0.95rem;
-        opacity: 0.96;
-      }
-      .section-card {
-        background: var(--surface-card);
-        border: 1px solid #dbe4f3;
-        border-radius: 12px;
-        padding: 12px 14px;
-        margin-bottom: 12px;
-      }
-      .section-title {
-        color: var(--text-main);
-        font-weight: 700;
-        margin-bottom: 4px;
-      }
-      .section-subtitle {
-        color: #51617f;
-        font-size: 0.9rem;
+        margin: 0 0 0.4rem 0;
+        color: white !important;
+        letter-spacing: -0.02em;
+    }
+    .hero-banner p {
+        font-size: 1.0rem;
+        opacity: 0.88;
         margin: 0;
-      }
-      [data-baseweb="tab-list"] {
-        gap: 8px;
-      }
-      [data-baseweb="tab"] {
-        border-radius: 10px !important;
-        background: #eaf0fb !important;
-        color: #24406f !important;
+        line-height: 1.6;
+    }
+    .hero-badge {
+        display: inline-block;
+        background: rgba(255,255,255,0.18);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 20px;
+        padding: 0.2rem 0.8rem;
+        font-size: 0.78rem;
+        font-weight: 600;
+        margin-top: 0.9rem;
+        letter-spacing: 0.04em;
+    }
+
+    /* ═══════════════════════════════════════
+       SECTION HEADER (bandeau parcours par tab)
+    ═══════════════════════════════════════ */
+    .section-header {
+        background: #F0F4FA;
+        border-left: 4px solid #005FAD;
+        border-radius: 0 10px 10px 0;
+        padding: 0.85rem 1.2rem;
+        margin: 0.5rem 0 1.4rem 0;
+    }
+    .section-header .step-label {
+        font-size: 0.73rem;
+        font-weight: 700;
+        color: #005FAD;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.15rem;
+    }
+    .section-header .step-title {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #1A1A2E;
+        margin: 0 0 0.15rem 0;
+    }
+    .section-header .step-desc {
+        font-size: 0.85rem;
+        color: #555;
+        margin: 0;
+    }
+
+    /* ═══════════════════════════════════════
+       TABS
+    ═══════════════════════════════════════ */
+    [data-testid="stTabs"] [data-baseweb="tab-list"] {
+        gap: 4px;
+        border-bottom: 2px solid #E2E8F0;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0;
+        padding: 0.55rem 1.1rem;
+        font-weight: 600;
+        font-size: 0.88rem;
+        color: #555;
+        background: transparent;
+        transition: background 0.15s, color 0.15s;
+    }
+    [data-testid="stTabs"] [aria-selected="true"] {
+        color: #005FAD !important;
+        border-bottom: 2px solid #005FAD !important;
+        background: #EBF3FB !important;
+    }
+
+    /* ═══════════════════════════════════════
+       BOUTONS PRIMAIRES
+    ═══════════════════════════════════════ */
+    [data-testid="baseButton-primary"] {
+        background: linear-gradient(135deg, #005FAD, #0077CC) !important;
+        border: none !important;
+        border-radius: 8px !important;
         font-weight: 600 !important;
-        padding: 8px 14px !important;
-      }
-      [aria-selected="true"][data-baseweb="tab"] {
-        background: #d8e5fb !important;
-      }
+        font-size: 0.95rem !important;
+        letter-spacing: 0.01em !important;
+        box-shadow: 0 2px 8px rgba(0, 95, 173, 0.22) !important;
+        transition: box-shadow 0.2s, transform 0.1s !important;
+    }
+    [data-testid="baseButton-primary"]:hover {
+        box-shadow: 0 4px 16px rgba(0, 95, 173, 0.35) !important;
+        transform: translateY(-1px) !important;
+    }
+
+    /* ═══════════════════════════════════════
+       BOUTONS SECONDAIRES
+    ═══════════════════════════════════════ */
+    [data-testid="baseButton-secondary"] {
+        border: 1.5px solid #005FAD !important;
+        color: #005FAD !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    /* ═══════════════════════════════════════
+       MÉTRIQUES (st.metric)
+    ═══════════════════════════════════════ */
+    [data-testid="metric-container"] {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    }
+    [data-testid="metric-container"] [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.05em !important;
+        color: #6B7280 !important;
+    }
+    [data-testid="metric-container"] [data-testid="stMetricValue"] {
+        font-size: 1.35rem !important;
+        font-weight: 700 !important;
+        color: #1A1A2E !important;
+    }
+
+    /* ═══════════════════════════════════════
+       ALERTS : SUCCESS / WARNING / ERROR / INFO
+    ═══════════════════════════════════════ */
+    [data-testid="stSuccess"] {
+        background: #ECFDF5;
+        border-left: 4px solid #10B981;
+        border-radius: 0 8px 8px 0;
+        color: #065F46;
+    }
+    [data-testid="stWarning"] {
+        background: #FFFBEB;
+        border-left: 4px solid #F59E0B;
+        border-radius: 0 8px 8px 0;
+        color: #78350F;
+    }
+    [data-testid="stError"] {
+        background: #FEF2F2;
+        border-left: 4px solid #EF4444;
+        border-radius: 0 8px 8px 0;
+        color: #7F1D1D;
+    }
+    [data-testid="stInfo"] {
+        background: #EFF6FF;
+        border-left: 4px solid #3B82F6;
+        border-radius: 0 8px 8px 0;
+        color: #1E3A8A;
+    }
+
+    /* ═══════════════════════════════════════
+       CARTES DE RÈGLES (validation)
+    ═══════════════════════════════════════ */
+    .rule-card-ok {
+        background: #ECFDF5;
+        border: 1px solid #A7F3D0;
+        border-radius: 8px;
+        padding: 0.5rem 0.9rem;
+        margin: 0.25rem 0;
+        font-size: 0.87rem;
+        color: #064E3B;
+    }
+    .rule-card-error {
+        background: #FEF2F2;
+        border: 1px solid #FECACA;
+        border-radius: 8px;
+        padding: 0.5rem 0.9rem;
+        margin: 0.25rem 0;
+        font-size: 0.87rem;
+        color: #7F1D1D;
+    }
+    .rule-card-warning {
+        background: #FFFBEB;
+        border: 1px solid #FDE68A;
+        border-radius: 8px;
+        padding: 0.5rem 0.9rem;
+        margin: 0.25rem 0;
+        font-size: 0.87rem;
+        color: #78350F;
+    }
+
+    /* ═══════════════════════════════════════
+       TIMELINE STATUT CHORUS PRO
+    ═══════════════════════════════════════ */
+    .chorus-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        padding: 0.7rem 1rem;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+        background: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        transition: background 0.2s;
+    }
+    .chorus-step.active {
+        background: #EBF3FB;
+        border-color: #005FAD;
+        border-left: 4px solid #005FAD;
+        color: #003D73;
+        font-weight: 700;
+    }
+    .chorus-step.done {
+        background: #ECFDF5;
+        border-color: #A7F3D0;
+        color: #065F46;
+    }
+
+    /* ═══════════════════════════════════════
+       EXPANDERS
+    ═══════════════════════════════════════ */
+    [data-testid="stExpander"] {
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 10px !important;
+        overflow: hidden;
+    }
+    [data-testid="stExpander"] summary {
+        font-weight: 600;
+        color: #1A1A2E;
+        padding: 0.6rem 0.8rem;
+    }
+
+    /* ═══════════════════════════════════════
+       INPUTS & SELECTBOX
+    ═══════════════════════════════════════ */
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-baseweb="select"] {
+        border-radius: 7px !important;
+        border-color: #CBD5E1 !important;
+        font-size: 0.9rem !important;
+    }
+    [data-testid="stTextInput"] input:focus,
+    [data-testid="stNumberInput"] input:focus {
+        border-color: #005FAD !important;
+        box-shadow: 0 0 0 2px rgba(0,95,173,0.15) !important;
+    }
+
+    /* ═══════════════════════════════════════
+       FOOTER
+    ═══════════════════════════════════════ */
+    .app-footer {
+        text-align: center;
+        padding: 1.5rem 0 0.5rem 0;
+        font-size: 0.78rem;
+        color: #9CA3AF;
+        border-top: 1px solid #E2E8F0;
+        margin-top: 3rem;
+    }
+    .app-footer strong {
+        color: #005FAD;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ── Titre ─────────────────────────────────────────────────
-st.title("🧾 Démo Facturation Électronique 2026")
-st.caption(
-    "Outil de démonstration Niji — Génération, validation et conversion "
-    "de factures électroniques conformes à la réforme 2026 (EN16931, Factur-X, UBL 2.1)"
-)
 st.markdown(
     """
-    <div class="hero-card">
-      <div class="hero-title">Transformez vos démos en opportunités commerciales</div>
-      <div class="hero-subtitle">
-        Créez, importez et validez des factures électroniques avec une expérience guidée, claire et moderne.
-      </div>
+    <div class="hero-banner">
+        <h1>🧾 Facturation Électronique 2026</h1>
+        <p>Outil de démonstration Niji — Générez, validez et convertissez des factures conformes<br>
+        à la réforme 2026 : <strong>EN 16931 · Factur-X · UBL 2.1 · Chorus Pro</strong></p>
+        <span class="hero-badge">🔵 DÉMO NIJI — Réforme obligatoire · 1er sept. 2026</span>
     </div>
     """,
     unsafe_allow_html=True,
@@ -134,9 +357,10 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.markdown(
         """
-        <div class="section-card">
-          <div class="section-title">Parcours 1 · Génération guidée</div>
-          <p class="section-subtitle">Saisissez vos données métier et produisez un document prêt à validation.</p>
+        <div class="section-header">
+          <div class="step-label">Parcours 1</div>
+          <div class="step-title">Génération guidée</div>
+          <p class="step-desc">Saisissez vos données métier et produisez un document prêt à validation.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -361,9 +585,10 @@ with tab1:
 with tab2:
     st.markdown(
         """
-        <div class="section-card">
-          <div class="section-title">Parcours 2 · Validation unifiée</div>
-          <p class="section-subtitle">Obtenez un statut global, des explications lisibles et des actions de correction.</p>
+        <div class="section-header">
+          <div class="step-label">Parcours 2</div>
+          <div class="step-title">Validation unifiée</div>
+          <p class="step-desc">Obtenez un statut global, des explications lisibles et des actions de correction.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -905,9 +1130,10 @@ with tab2:
 with tab3:
     st.markdown(
         """
-        <div class="section-card">
-          <div class="section-title">Parcours 3 · Dépôt (simulation)</div>
-          <p class="section-subtitle">Illustrez le flux cible tout en conservant le périmètre phase actuelle.</p>
+        <div class="section-header">
+          <div class="step-label">Parcours 3</div>
+          <div class="step-title">Dépôt (simulation)</div>
+          <p class="step-desc">Illustrez le flux cible vers Chorus Pro sans appel réseau réel.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -972,9 +1198,10 @@ Pour un vrai dépôt, configurez vos credentials PISTE dans `.env`.
 with tab4:
     st.markdown(
         """
-        <div class="section-card">
-          <div class="section-title">Parcours 4 · Suivi de traitement</div>
-          <p class="section-subtitle">Visualisez simplement les statuts pour faciliter la narration en démonstration.</p>
+        <div class="section-header">
+          <div class="step-label">Parcours 4</div>
+          <div class="step-title">Suivi de traitement</div>
+          <p class="step-desc">Visualisez la progression des statuts pour faciliter la narration en démo.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1023,9 +1250,10 @@ with tab4:
 with tab5:
     st.markdown(
         """
-        <div class="section-card">
-          <div class="section-title">Parcours 5 · Import XML legacy</div>
-          <p class="section-subtitle">Mappez, normalisez et corrigez vos données externes en toute transparence.</p>
+        <div class="section-header">
+          <div class="step-label">Parcours 5</div>
+          <div class="step-title">Import XML legacy</div>
+          <p class="step-desc">Mappez, normalisez et corrigez vos données externes en toute transparence.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1270,3 +1498,13 @@ with tab5:
 # ─────────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────────
+st.markdown(
+    """
+    <div class="app-footer">
+        <strong>Niji</strong> · Démo Facturation Électronique 2026 · 
+        EN 16931 · Factur-X · UBL 2.1 · Chorus Pro<br>
+        Outil interne — non contractuel
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
