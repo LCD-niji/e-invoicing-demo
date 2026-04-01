@@ -32,11 +32,87 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+st.markdown(
+    """
+    <style>
+      :root {
+        --brand-primary: #0f3d91;
+        --brand-accent: #00a8c6;
+        --surface: #f5f7fb;
+        --surface-card: #ffffff;
+        --text-main: #1f2a44;
+      }
+      .stApp {
+        background: linear-gradient(180deg, #f7f9fd 0%, #eef3fb 100%);
+      }
+      .hero-card {
+        background: linear-gradient(135deg, #0f3d91 0%, #1c5fd1 55%, #00a8c6 100%);
+        border-radius: 16px;
+        padding: 20px 22px;
+        margin: 8px 0 16px 0;
+        color: #ffffff;
+        box-shadow: 0 8px 24px rgba(15, 61, 145, 0.18);
+      }
+      .hero-title {
+        font-size: 1.35rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .hero-subtitle {
+        font-size: 0.95rem;
+        opacity: 0.96;
+      }
+      .section-card {
+        background: var(--surface-card);
+        border: 1px solid #dbe4f3;
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .section-title {
+        color: var(--text-main);
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .section-subtitle {
+        color: #51617f;
+        font-size: 0.9rem;
+        margin: 0;
+      }
+      [data-baseweb="tab-list"] {
+        gap: 8px;
+      }
+      [data-baseweb="tab"] {
+        border-radius: 10px !important;
+        background: #eaf0fb !important;
+        color: #24406f !important;
+        font-weight: 600 !important;
+        padding: 8px 14px !important;
+      }
+      [aria-selected="true"][data-baseweb="tab"] {
+        background: #d8e5fb !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ── Titre ─────────────────────────────────────────────────
 st.title("🧾 Démo Facturation Électronique 2026")
 st.caption(
     "Outil de démonstration Niji — Génération, validation et conversion "
     "de factures électroniques conformes à la réforme 2026 (EN16931, Factur-X, UBL 2.1)"
+)
+st.markdown(
+    """
+    <div class="hero-card">
+      <div class="hero-title">Transformez vos démos en opportunités commerciales</div>
+      <div class="hero-subtitle">
+        Créez, importez et validez des factures électroniques avec une expérience guidée, claire et moderne.
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 # ═══════════════════════════════════════════
@@ -56,6 +132,15 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ═══════════════════════════════════════════
 
 with tab1:
+    st.markdown(
+        """
+        <div class="section-card">
+          <div class="section-title">Parcours 1 · Génération guidée</div>
+          <p class="section-subtitle">Saisissez vos données métier et produisez un document prêt à validation.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.subheader("Génération d'une facture électronique")
     preloaded_example = get_preloaded_examples()["PME Services FR"]
 
@@ -274,6 +359,15 @@ with tab1:
 # ═══════════════════════════════════════════
 
 with tab2:
+    st.markdown(
+        """
+        <div class="section-card">
+          <div class="section-title">Parcours 2 · Validation unifiée</div>
+          <p class="section-subtitle">Obtenez un statut global, des explications lisibles et des actions de correction.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.subheader("Validation de la facture électronique")
 
     # ── Sélecteur source ──────────────────────────────────
@@ -809,6 +903,15 @@ with tab2:
 # ═══════════════════════════════════════════
 
 with tab3:
+    st.markdown(
+        """
+        <div class="section-card">
+          <div class="section-title">Parcours 3 · Dépôt (simulation)</div>
+          <p class="section-subtitle">Illustrez le flux cible tout en conservant le périmètre phase actuelle.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.subheader("Dépôt vers Chorus Pro")
 
     st.info("""
@@ -867,6 +970,15 @@ Pour un vrai dépôt, configurez vos credentials PISTE dans `.env`.
 # ═══════════════════════════════════════════
 
 with tab4:
+    st.markdown(
+        """
+        <div class="section-card">
+          <div class="section-title">Parcours 4 · Suivi de traitement</div>
+          <p class="section-subtitle">Visualisez simplement les statuts pour faciliter la narration en démonstration.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.subheader("Suivi du traitement Chorus Pro")
 
     sub_id = st.session_state.get("submission_id", "")
@@ -909,6 +1021,15 @@ with tab4:
 # ═══════════════════════════════════════════
 
 with tab5:
+    st.markdown(
+        """
+        <div class="section-card">
+          <div class="section-title">Parcours 5 · Import XML legacy</div>
+          <p class="section-subtitle">Mappez, normalisez et corrigez vos données externes en toute transparence.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.subheader("Conversion XML Legacy → Factur-X CII")
     st.caption(
         "Vous avez une facture dans un format XML propriétaire (SAP, Sage, Cegid, EBP…) ? "
