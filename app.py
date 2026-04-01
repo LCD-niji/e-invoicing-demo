@@ -341,14 +341,25 @@ st.markdown(
 # ═══════════════════════════════════════════
 # CRÉATION DES TABS  ← obligatoire avant tout with tab1/tab2/...
 # ═══════════════════════════════════════════
+# Masque les onglets Dépôt / Suivi Chorus Pro (le code des onglets reste ci-dessous, non exécuté si False).
+SHOW_CHORUS_UI = False
+# Numéro d’étape affiché pour l’import legacy (cohérent avec la présence des onglets Chorus).
+LEGACY_STEP_LABEL = "Parcours 5" if SHOW_CHORUS_UI else "Parcours 3"
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📝 Générer une facture",
-    "✅ Valider",
-    "📡 Dépôt Chorus Pro",
-    "🔄 Suivi Chorus Pro",
-    "🔄 Conversion XML Legacy",
-])
+if SHOW_CHORUS_UI:
+    tab1, tab2, tab3, tab4, tab_legacy = st.tabs([
+        "📝 Générer une facture",
+        "✅ Valider",
+        "📡 Dépôt Chorus Pro",
+        "🔄 Suivi Chorus Pro",
+        "🔄 Conversion XML Legacy",
+    ])
+else:
+    tab1, tab2, tab_legacy = st.tabs([
+        "📝 Générer une facture",
+        "✅ Valider",
+        "🔄 Conversion XML Legacy",
+    ])
 
 # ═══════════════════════════════════════════
 # TAB 1 — Génération
@@ -1127,131 +1138,131 @@ with tab2:
 # TAB 3 — Dépôt Chorus Pro
 # ═══════════════════════════════════════════
 
-with tab3:
-    st.markdown(
-        """
-        <div class="section-header">
-          <div class="step-label">Parcours 3</div>
-          <div class="step-title">Dépôt (simulation)</div>
-          <p class="step-desc">Illustrez le flux cible vers Chorus Pro sans appel réseau réel.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.subheader("Dépôt vers Chorus Pro")
+if SHOW_CHORUS_UI:
+    with tab3:
+        st.markdown(
+            """
+            <div class="section-header">
+              <div class="step-label">Parcours 3</div>
+              <div class="step-title">Dépôt (simulation)</div>
+              <p class="step-desc">Illustrez le flux cible vers Chorus Pro sans appel réseau réel.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.subheader("Dépôt vers Chorus Pro")
 
-    st.info("""
+        st.info("""
 **🔵 Mode simulation activé**
 
 Cette démo simule le dépôt sans faire d'appel réseau réel.
 Pour un vrai dépôt, configurez vos credentials PISTE dans `.env`.
     """)
 
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        siret_dest = st.text_input("SIRET entité publique destinataire",
-                                    value="13000682900012",
-                                    help="Ex : 13000682900012 = Ministère de l'Économie")
-    with col_c2:
-        service_code = st.text_input("Code service (optionnel)", value="")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            siret_dest = st.text_input("SIRET entité publique destinataire",
+                                        value="13000682900012",
+                                        help="Ex : 13000682900012 = Ministère de l'Économie")
+        with col_c2:
+            service_code = st.text_input("Code service (optionnel)", value="")
 
-    if st.button("🚀 Déposer la facture", type="primary", use_container_width=True):
-        if "xml_content" not in st.session_state:
-            st.warning("⚠️ Générez d'abord une facture dans l'onglet 1")
-        else:
-            tmp_path_chorus = "/tmp/facture_chorus.xml"
-            with open(tmp_path_chorus, "w", encoding="utf-8") as f:
-                f.write(st.session_state["xml_content"])
-
-            with st.spinner("Dépôt en cours..."):
-                steps_placeholder = st.empty()
-                steps = [
-                    "🔐 Authentification OAuth2 PISTE",
-                    "📤 Encodage Base64 du flux XML",
-                    "🚀 Envoi vers Chorus Pro sandbox",
-                    "✅ Réception accusé de dépôt",
-                ]
-                for i, step in enumerate(steps):
-                    steps_placeholder.markdown("\n".join(
-                        [f"{'✅' if j < i else '⏳' if j == i else '⏸️'} {s}"
-                         for j, s in enumerate(steps)]
-                    ))
-                    time.sleep(0.4)
-
-                result_chorus = simulate_submission(tmp_path_chorus)
-                steps_placeholder.empty()
-
-            if result_chorus.success:
-                st.success(f"✅ Facture déposée ! ID de dépôt : **{result_chorus.submission_id}**")
-                st.session_state["submission_id"] = result_chorus.submission_id
-                st.markdown("#### 📋 Accusé de dépôt")
-                st.json(result_chorus.raw_response)
-                st.info("💡 Allez dans l'onglet **Statut & Suivi** pour suivre le traitement")
+        if st.button("🚀 Déposer la facture", type="primary", use_container_width=True):
+            if "xml_content" not in st.session_state:
+                st.warning("⚠️ Générez d'abord une facture dans l'onglet 1")
             else:
-                st.error(f"❌ Échec : {result_chorus.message}")
+                tmp_path_chorus = "/tmp/facture_chorus.xml"
+                with open(tmp_path_chorus, "w", encoding="utf-8") as f:
+                    f.write(st.session_state["xml_content"])
 
+                with st.spinner("Dépôt en cours..."):
+                    steps_placeholder = st.empty()
+                    steps = [
+                        "🔐 Authentification OAuth2 PISTE",
+                        "📤 Encodage Base64 du flux XML",
+                        "🚀 Envoi vers Chorus Pro sandbox",
+                        "✅ Réception accusé de dépôt",
+                    ]
+                    for i, step in enumerate(steps):
+                        steps_placeholder.markdown("\n".join(
+                            [f"{'✅' if j < i else '⏳' if j == i else '⏸️'} {s}"
+                             for j, s in enumerate(steps)]
+                        ))
+                        time.sleep(0.4)
 
-# ═══════════════════════════════════════════
-# TAB 4 — Statut & Suivi
-# ═══════════════════════════════════════════
+                    result_chorus = simulate_submission(tmp_path_chorus)
+                    steps_placeholder.empty()
 
-with tab4:
-    st.markdown(
-        """
-        <div class="section-header">
-          <div class="step-label">Parcours 4</div>
-          <div class="step-title">Suivi de traitement</div>
-          <p class="step-desc">Visualisez la progression des statuts pour faciliter la narration en démo.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.subheader("Suivi du traitement Chorus Pro")
+                if result_chorus.success:
+                    st.success(f"✅ Facture déposée ! ID de dépôt : **{result_chorus.submission_id}**")
+                    st.session_state["submission_id"] = result_chorus.submission_id
+                    st.markdown("#### 📋 Accusé de dépôt")
+                    st.json(result_chorus.raw_response)
+                    st.info("💡 Allez dans l'onglet **Statut & Suivi** pour suivre le traitement")
+                else:
+                    st.error(f"❌ Échec : {result_chorus.message}")
 
-    sub_id = st.session_state.get("submission_id", "")
-    submission_input = st.text_input("ID de dépôt", value=sub_id or "",
-                                      placeholder="DEP-20260101-ABCD1234")
+    # ═══════════════════════════════════════════
+    # TAB 4 — Statut & Suivi
+    # ═══════════════════════════════════════════
 
-    if st.button("📊 Simuler la progression du statut", type="primary",
-                  use_container_width=True, disabled=not submission_input):
-        if not submission_input:
-            st.warning("⚠️ Saisissez un ID de dépôt")
-        else:
-            st.markdown("#### 🔄 Workflow de traitement")
-            progress_bar = st.progress(0)
-            status_placeholder = st.empty()
+    with tab4:
+        st.markdown(
+            """
+            <div class="section-header">
+              <div class="step-label">Parcours 4</div>
+              <div class="step-title">Suivi de traitement</div>
+              <p class="step-desc">Visualisez la progression des statuts pour faciliter la narration en démo.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.subheader("Suivi du traitement Chorus Pro")
 
-            statuses = simulate_status_progression(submission_input)
-            total    = len(statuses)
-            history  = []
+        sub_id = st.session_state.get("submission_id", "")
+        submission_input = st.text_input("ID de dépôt", value=sub_id or "",
+                                          placeholder="DEP-20260101-ABCD1234")
 
-            for i, res in enumerate(statuses):
-                history.append(res)
-                progress_bar.progress((i + 1) / total)
+        if st.button("📊 Simuler la progression du statut", type="primary",
+                      use_container_width=True, disabled=not submission_input):
+            if not submission_input:
+                st.warning("⚠️ Saisissez un ID de dépôt")
+            else:
+                st.markdown("#### 🔄 Workflow de traitement")
+                progress_bar = st.progress(0)
+                status_placeholder = st.empty()
 
-                html_steps = ""
-                for j, h in enumerate(history):
-                    icon, desc = CHORUS_STATUS.get(h.status, ("❓", h.status))
-                    is_current = j == len(history) - 1
-                    style = "border-left: 4px solid #28a745; background: #d4edda;" if is_current else ""
-                    html_steps += f'<div class="chorus-step" style="{style}">{icon} <strong>{h.status}</strong> — {desc}</div>'
+                statuses = simulate_status_progression(submission_input)
+                total    = len(statuses)
+                history  = []
 
-                status_placeholder.markdown(html_steps, unsafe_allow_html=True)
+                for i, res in enumerate(statuses):
+                    history.append(res)
+                    progress_bar.progress((i + 1) / total)
 
-            progress_bar.progress(1.0)
-            st.success("🎉 Facture traitée avec succès — Paiement programmé !")
-            st.balloons()
+                    html_steps = ""
+                    for j, h in enumerate(history):
+                        icon, desc = CHORUS_STATUS.get(h.status, ("❓", h.status))
+                        is_current = j == len(history) - 1
+                        style = "border-left: 4px solid #28a745; background: #d4edda;" if is_current else ""
+                        html_steps += f'<div class="chorus-step" style="{style}">{icon} <strong>{h.status}</strong> — {desc}</div>'
+
+                    status_placeholder.markdown(html_steps, unsafe_allow_html=True)
+
+                progress_bar.progress(1.0)
+                st.success("🎉 Facture traitée avec succès — Paiement programmé !")
+                st.balloons()
 
 
 # ═══════════════════════════════════════════
 # TAB 5 — Conversion XML Legacy → Factur-X
 # ═══════════════════════════════════════════
 
-with tab5:
+with tab_legacy:
     st.markdown(
-        """
+        f"""
         <div class="section-header">
-          <div class="step-label">Parcours 5</div>
+          <div class="step-label">{LEGACY_STEP_LABEL}</div>
           <div class="step-title">Import XML legacy</div>
           <p class="step-desc">Mappez, normalisez et corrigez vos données externes en toute transparence.</p>
         </div>

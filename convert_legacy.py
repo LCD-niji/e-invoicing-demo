@@ -98,6 +98,10 @@ class ExtractionResult:
         return self.mapped.get("BT-38", "")
 
     @property
+    def seller_postal(self) -> str:
+        return self.mapped.get("BT-38", "")
+
+    @property
     def seller_country(self) -> str:
         return self.mapped.get("BT-40", "FR")
 
@@ -118,19 +122,6 @@ class ExtractionResult:
         return self.mapped.get("BT-47", "")
 
     @property
-    def buyer_city(self) -> str:
-        return self.mapped.get("BT-53", "")
-
-    @property
-    def buyer_country(self) -> str:
-        return self.mapped.get("BT-55", "FR")
-    
-    @property
-    def seller_postal(self) -> str:
-        """Alias de seller_postal_code pour compatibilité app.py"""
-        return self.mapped.get("BT-38", "")
-
-    @property
     def buyer_vat(self) -> str:
         return self.mapped.get("BT-48", "")
 
@@ -139,13 +130,71 @@ class ExtractionResult:
         return self.mapped.get("BT-50", "")
 
     @property
+    def buyer_city(self) -> str:
+        return self.mapped.get("BT-53", "")
+
+    @property
     def buyer_postal(self) -> str:
         return self.mapped.get("BT-53", "")
 
     @property
-    def matched_fields(self) -> dict:
-        """Retourne le dict des BT mappés — pour affichage dans app.py"""
+    def buyer_country(self) -> str:
+        return self.mapped.get("BT-55", "FR")
+
+    @property
+    def matched_fields(self) -> dict[str, str]:
         return self.mapped
+
+    @property
+    def normalized_payload(self) -> dict[str, Any]:
+        return {
+            "invoice_number": self.invoice_number,
+            "issue_date": self.issue_date,
+            "due_date": self.due_date,
+            "type_code": self.type_code,
+            "currency": self.currency,
+            "buyer_ref": self.buyer_ref,
+            "contract_ref": self.contract_ref,
+            "purchase_order": self.purchase_order,
+            "notes": self.notes,
+            "seller": {
+                "name": self.seller_name,
+                "siret": self.seller_siret,
+                "vat": self.seller_vat,
+                "street": self.seller_street,
+                "city": self.seller_city,
+                "postal_code": self.seller_postal,
+                "country": self.seller_country,
+                "iban": self.seller_iban,
+                "bic": self.seller_bic,
+            },
+            "buyer": {
+                "name": self.buyer_name,
+                "siret": self.buyer_siret,
+                "vat": self.buyer_vat,
+                "street": self.buyer_street,
+                "city": self.buyer_city,
+                "postal_code": self.buyer_postal,
+                "country": self.buyer_country,
+            },
+            "lines": [
+                {
+                    "line_id": ln.line_id,
+                    "description": ln.description,
+                    "quantity": ln.quantity,
+                    "unit_price": ln.unit_price,
+                    "vat_rate": ln.vat_rate,
+                    "unit": ln.unit,
+                }
+                for ln in self.lines
+            ],
+            "unmatched_tags": self.unmatched_tags,
+            "stats": {
+                "total_tags": self.total_tags,
+                "matched_tags": self.matched_tags,
+                "match_rate": self.match_rate,
+            },
+        }
 
 # ─────────────────────────────────────────────────────────────
 # Normalisation
@@ -330,25 +379,6 @@ class LineResult:
     vat_rate:    float = 20.0
     unit:        str = "C62"
     raw_fields:  dict = field(default_factory=dict)
-
-
-@dataclass
-class ExtractionResult:
-    # Champs mappés
-    mapped: dict[str, str] = field(default_factory=dict)
-    # Lignes
-    lines: list[LineResult] = field(default_factory=list)
-    # Tags non reconnus : {tag_norm: (tag_original, valeur)}
-    unmatched_tags: dict[str, tuple[str, str]] = field(default_factory=dict)
-    # Stats
-    total_tags:   int = 0
-    matched_tags: int = 0
-
-    @property
-    def match_rate(self) -> float:
-        if self.total_tags == 0:
-            return 0.0
-        return round(self.matched_tags / self.total_tags * 100, 1)
 
 
 # ─────────────────────────────────────────────────────────────
