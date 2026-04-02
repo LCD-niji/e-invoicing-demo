@@ -212,9 +212,19 @@ class ExtractionResult:
 # Normalisation
 # ─────────────────────────────────────────────────────────────
 
-def _normalize(tag: str) -> str:
+def _normalize(tag: Any) -> str:
     """Minuscules, sans séparateurs ni namespace."""
-    tag = re.sub(r"\{[^}]+\}", "", tag)   # retire namespace XML
+    if tag is None:
+        return ""
+    if isinstance(tag, bytes):
+        tag = tag.decode("utf-8", errors="replace")
+    elif not isinstance(tag, str):
+        # lxml : QName, nœuds Comment/PI (tag non str) — re.sub exige une str
+        try:
+            tag = str(tag)
+        except Exception:
+            return ""
+    tag = re.sub(r"\{[^}]+\}", "", tag)  # retire namespace XML
     return re.sub(r"[^a-z0-9]", "", tag.lower())
 
 
