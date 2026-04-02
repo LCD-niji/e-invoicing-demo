@@ -8,12 +8,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-import html
 import json
 import re
 from typing import Any
-
-import streamlit as st
 
 from convert_legacy import _parse_date as _legacy_parse_date
 
@@ -62,6 +59,8 @@ def consume_legacy_dnd_query_params(uf: dict[str, str]) -> bool:
     Si l'URL contient ?legacy_dnd=<base64url json {bt: tag}>, applique legacy_bt_overrides.
     Retourne True si consommé (st.rerun est appelé à l'intérieur).
     """
+    import streamlit as st
+
     qp = st.query_params
     if "legacy_dnd" not in qp:
         return False
@@ -109,6 +108,12 @@ def consume_legacy_dnd_query_params(uf: dict[str, str]) -> bool:
     return True
 
 
+def _json_for_html_script(obj: Any) -> str:
+    """Sérialise en JSON sans casser le parseur ni fermer une balise </script> dans la page."""
+    s = json.dumps(obj, ensure_ascii=False)
+    return s.replace("<", "\\u003c")
+
+
 def build_legacy_dnd_html(uf: dict[str, str], grouped: list[tuple[str, list[dict]]]) -> str:
     sources: list[dict[str, str]] = [{"tag": t, "value": v} for t, v in sorted(uf.items())]
     groups_js: list[dict[str, Any]] = []
@@ -120,8 +125,8 @@ def build_legacy_dnd_html(uf: dict[str, str], grouped: list[tuple[str, list[dict
             }
         )
 
-    sources_json = html.escape(json.dumps(sources, ensure_ascii=False))
-    groups_json = html.escape(json.dumps(groups_js, ensure_ascii=False))
+    sources_json = _json_for_html_script(sources)
+    groups_json = _json_for_html_script(groups_js)
 
     return f"""<!DOCTYPE html>
 <html lang="fr">
@@ -213,9 +218,11 @@ def build_legacy_dnd_html(uf: dict[str, str], grouped: list[tuple[str, list[dict
     </div>
   </div>
 </div>
+<script type="application/json" id="legacy-dnd-sources">{sources_json}</script>
+<script type="application/json" id="legacy-dnd-groups">{groups_json}</script>
 <script>
-const SOURCES = JSON.parse({sources_json});
-const GROUPS = JSON.parse({groups_json});
+const SOURCES = JSON.parse(document.getElementById('legacy-dnd-sources').textContent);
+const GROUPS = JSON.parse(document.getElementById('legacy-dnd-groups').textContent);
 let assignments = {{}};
 
 function allowDrop(ev) {{ ev.preventDefault(); }}

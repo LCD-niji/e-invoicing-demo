@@ -1663,10 +1663,13 @@ with tab_legacy:
 
                 st.markdown("#### 🧩 Cartographie manuelle — balises non reconnues")
                 st.caption(
-                    "**À gauche** : tuiles (balises du XML). **À droite** : champs BT cibles. "
-                    "Glissez-déposez une tuile sur un champ, puis **Valider le mapping** pour appliquer au formulaire."
+                    "Le compteur **Champs non mappés** (ci-dessus) indique les balises XML sans correspondance automatique. "
+                    "Ici vous les associez aux champs normés (BT) : **1)** à gauche, faites glisser une tuile vers une zone "
+                    "**Déposer ici** à droite ; **2)** cliquez **Valider le mapping** pour enregistrer et mettre à jour le formulaire."
                 )
-                st.caption(f"**{len(uf)}** balise(s) avec valeur — corbeille ou × pour libérer une affectation.")
+                st.caption(
+                    f"**{len(uf)}** tuile(s) affichée(s) ci-dessous — corbeille ou × sur une puce pour annuler une affectation."
+                )
                 bt_entries = get_active_bt_list()
                 grouped = group_legacy_bt_entries(bt_entries)
                 render_legacy_dnd_component(uf, grouped)
