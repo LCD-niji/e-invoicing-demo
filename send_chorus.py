@@ -282,8 +282,10 @@ def simulate_submission(xml_path: str) -> SubmissionResult:
     Simule un dépôt Chorus Pro pour la démo.
     Reproduit le comportement de l'API sans appel réseau.
     """
-    print("\n🔵 Mode SIMULATION (aucun appel réseau)")
-    print("   → Pour un vrai dépôt, configurez .env avec vos credentials PISTE\n")
+    # NOTE: stdout sous Windows est parfois en cp1252 ; certains emojis
+    # provoquaient un UnicodeEncodeError dans les tests.
+    print("\n[Mode SIMULATION] (aucun appel reseau)")
+    print("   - Pour un vrai depot, configurez .env avec vos credentials PISTE\n")
 
     # Vérification basique du fichier
     try:
@@ -297,10 +299,10 @@ def simulate_submission(xml_path: str) -> SubmissionResult:
 
     # Simulation des étapes
     steps = [
-        ("🔐 Authentification OAuth2 PISTE",        0.3),
-        ("📤 Encodage Base64 du flux XML",           0.2),
-        ("🚀 Envoi vers Chorus Pro sandbox",         0.8),
-        ("✅ Réception accusé de dépôt",             0.4),
+        ("Authentification OAuth2 PISTE",        0.3),
+        ("Encodage Base64 du flux XML",         0.2),
+        ("Envoi vers Chorus Pro sandbox",      0.8),
+        ("Reception accuse de depot",          0.4),
     ]
     for step, delay in steps:
         print(f"   {step}...")

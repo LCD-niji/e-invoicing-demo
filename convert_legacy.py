@@ -26,7 +26,9 @@ class ExtractionResult:
     # Champs mappés (BT-1, BT-2, ...)
     mapped: dict[str, str] = field(default_factory=dict)
     lines: list[LineResult] = field(default_factory=list)
-    unmatched_tags: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Les tests + l'UI attendent une collection de tags non mappés,
+    # sans forcément conserver (tag XML original, valeur).
+    unmatched_tags: set[str] = field(default_factory=set)
     total_tags:   int = 0
     matched_tags: int = 0
 
@@ -147,7 +149,7 @@ class ExtractionResult:
 
     @property
     def normalized_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "invoice_number": self.invoice_number,
             "issue_date": self.issue_date,
             "due_date": self.due_date,
@@ -188,13 +190,20 @@ class ExtractionResult:
                 }
                 for ln in self.lines
             ],
-            "unmatched_tags": self.unmatched_tags,
+            # Sécuriser la sérialisation JSON (sets ne sont pas sérialisables nativement).
+            "unmatched_tags": sorted(self.unmatched_tags),
             "stats": {
                 "total_tags": self.total_tags,
                 "matched_tags": self.matched_tags,
                 "match_rate": self.match_rate,
             },
         }
+        # Compat tests: exposer les BT canoniques attendus par les scénarios legacy.
+        payload["BT-1"] = self.mapped.get("BT-1", "")
+        payload["BT-2"] = self.mapped.get("BT-2", "")
+        payload["BT-3"] = self.mapped.get("BT-3", self.type_code)
+        payload["BT-5"] = self.mapped.get("BT-5", self.currency)
+        return payload
 
 # ─────────────────────────────────────────────────────────────
 # Normalisation
@@ -470,7 +479,8 @@ def extract_from_xml(xml_content: str) -> ExtractionResult:
         try:
             root = etree.fromstring(xml_content.encode("latin-1", errors="replace"))
         except Exception as e:
-            result.unmatched_tags["_parse_error"] = ("error", str(e))
+            # On conserve au moins le fait qu'il y ait eu une erreur de parsing.
+            result.unmatched_tags.add("_parse_error")
             return result
 
     # Détecter les lignes d'abord pour les exclure du mapping entête
@@ -503,7 +513,7 @@ def extract_from_xml(xml_content: str) -> ExtractionResult:
                 result.mapped[bt] = value
                 result.matched_tags += 1
         else:
-            result.unmatched_tags[tag_norm] = (el.tag, value)
+            result.unmatched_tags.add(tag_norm)
 
     # ── Post-traitement dates ──────────────────────────────
     for bt in ("BT-2", "BT-9"):

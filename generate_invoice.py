@@ -59,11 +59,16 @@ class InvoiceLine:
 
     @property
     def line_total_ht(self) -> Decimal:
-        return (self.quantity * self.unit_price).quantize(Decimal("0.01"))
+        # Les tests construisent parfois InvoiceLine avec des `int` (pas des Decimal).
+        # On convertit donc avant quantize.
+        q = self.quantity if isinstance(self.quantity, Decimal) else Decimal(str(self.quantity))
+        u = self.unit_price if isinstance(self.unit_price, Decimal) else Decimal(str(self.unit_price))
+        return (q * u).quantize(Decimal("0.01"))
 
     @property
     def vat_amount(self) -> Decimal:
-        return (self.line_total_ht * self.vat_rate / 100).quantize(Decimal("0.01"))
+        vr = self.vat_rate if isinstance(self.vat_rate, Decimal) else Decimal(str(self.vat_rate))
+        return (self.line_total_ht * vr / 100).quantize(Decimal("0.01"))
 
     @property
     def line_total_ttc(self) -> Decimal:
@@ -210,8 +215,20 @@ def _date(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
-def _amt(d: Decimal) -> str:
-    return str(d.quantize(Decimal("0.01")))
+def _amt(d) -> str:
+    """
+    Convertit un nombre (Decimal/int/float/str) en montant formaté à 2 décimales.
+    (Les tests legacy passent parfois des int → éviter `AttributeError` sur quantize.)
+    """
+    if isinstance(d, Decimal):
+        val = d
+    else:
+        try:
+            # str(d) évite des surprises liées aux floats binaires
+            val = Decimal(str(d))
+        except (InvalidOperation, ValueError, TypeError):
+            val = Decimal("0")
+    return str(val.quantize(Decimal("0.01")))
 
 
 # ─────────────────────────────────────────────

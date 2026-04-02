@@ -18,9 +18,10 @@ from schematron_validator import validate_en16931, detect_syntax
 from rules_engine.ai_validator import AiValidator
 from convert_legacy      import extract_from_xml, make_sample_legacy_xml, ExtractionResult
 from send_chorus         import simulate_submission, simulate_status_progression, CHORUS_STATUS
-from invoice_payload     import build_invoice_from_form, get_preloaded_examples
+from invoice_payload     import build_invoice_from_form, get_preloaded_examples, get_demo_scenarios
 from validation_explainability import explain_issue_plain_language, remediation_guidance
 from xml_import_helpers import decode_uploaded_xml, parse_xml_safely
+from pdf_legacy_analyzer import analyze_plain_pdf
 
 
 
@@ -347,17 +348,19 @@ SHOW_CHORUS_UI = False
 LEGACY_STEP_LABEL = "Parcours 5" if SHOW_CHORUS_UI else "Parcours 3"
 
 if SHOW_CHORUS_UI:
-    tab1, tab2, tab3, tab4, tab_legacy = st.tabs([
+    tab1, tab2, tab_audit, tab3, tab4, tab_legacy = st.tabs([
         "📝 Générer une facture",
         "✅ Valider",
+        "🔍 Audit PDF",
         "📡 Dépôt Chorus Pro",
         "🔄 Suivi Chorus Pro",
         "🔄 Conversion XML Legacy",
     ])
 else:
-    tab1, tab2, tab_legacy = st.tabs([
+    tab1, tab2, tab_audit, tab_legacy = st.tabs([
         "📝 Générer une facture",
         "✅ Valider",
+        "🔍 Audit PDF",
         "🔄 Conversion XML Legacy",
     ])
 
@@ -377,7 +380,12 @@ with tab1:
         unsafe_allow_html=True,
     )
     st.subheader("Génération d'une facture électronique")
-    preloaded_example = get_preloaded_examples()["PME Services FR"]
+    _scenario_override = st.session_state.get("scenario_form_data")
+    preloaded_example = (
+        _scenario_override
+        if _scenario_override
+        else get_preloaded_examples()["PME Services FR"]
+    )
 
     # ── Sélecteur syntaxe + profil ────────────────────────
     col_syntax, col_profile = st.columns(2)
@@ -1132,6 +1140,210 @@ with tab2:
             "info": len(unified_info),
             "timestamp": st.session_state["last_validation_trigger"],
         }
+
+
+# ═══════════════════════════════════════════
+# TAB AUDIT PDF — Analyse PDF classique
+# ═══════════════════════════════════════════
+with tab_audit:
+    st.markdown(
+        """
+        <div class="section-header">
+            <div class="step-label">Parcours 0 — Point d'entrée</div>
+            <div class="step-title">Audit de votre facture actuelle</div>
+            <p class="step-desc">
+                Uploadez n'importe quelle facture PDF. On vous dit en 10 secondes
+                si elle sera rejetée en septembre 2026 et ce qu'il faut corriger.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.info(
+        "💡 **Vous envoyez encore vos factures en PDF par email ?** "
+        "Déposez-en une ici pour voir l'impact concret de la réforme sur votre facture actuelle."
+    )
+
+    uploaded_pdf_audit = st.file_uploader(
+        "📂 Déposez votre facture PDF ici",
+        type=["pdf"],
+        key="audit_pdf_upload",
+        help="PDF classique, PDF Factur-X, ou tout format de facture numérique actuel.",
+    )
+
+    if uploaded_pdf_audit:
+        pdf_bytes_audit = uploaded_pdf_audit.read()
+
+        with st.spinner("🔍 Analyse de votre facture en cours..."):
+            result = analyze_plain_pdf(pdf_bytes_audit)
+
+        # ── Cas Factur-X détecté ──────────────────────────────────────────
+        if result.is_facturx:
+            st.success(
+                "✅ **Bonne nouvelle !** Ce PDF est déjà un Factur-X (XML CII embarqué détecté). "
+                "Il est conforme au format requis par la réforme 2026. "
+                "Allez dans l'onglet **Valider** pour contrôler les règles métier."
+            )
+
+        # ── PDF classique ─────────────────────────────────────────────────
+        else:
+            # Score visuel
+            score = result.score
+            score_color = (
+                "#10B981" if score >= 70 else "#F59E0B" if score >= 40 else "#EF4444"
+            )
+            score_label = (
+                "Peu risquée" if score >= 70 else "Risquée" if score >= 40 else "Non conforme 2026"
+            )
+
+            col_score, col_meta = st.columns([1, 2])
+
+            with col_score:
+                st.markdown(
+                    f"""
+                    <div style="
+                        background: #FEF2F2;
+                        border: 2px solid {score_color};
+                        border-radius: 14px;
+                        padding: 1.5rem;
+                        text-align: center;
+                    ">
+                        <div style="font-size: 0.8rem; font-weight: 700; color: #6B7280;
+                                    text-transform: uppercase; letter-spacing: 0.06em;">
+                            Score de conformité
+                        </div>
+                        <div style="font-size: 3.2rem; font-weight: 800; color: {score_color};
+                                    line-height: 1.1; margin: 0.4rem 0;">
+                            {score}/100
+                        </div>
+                        <div style="font-size: 0.9rem; font-weight: 600; color: {score_color};">
+                            {score_label}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with col_meta:
+                st.metric("Type de document", "PDF classique (non structuré)")
+                st.metric("Pages", result.page_count)
+                col_b, col_w = st.columns(2)
+                col_b.metric("🔴 Erreurs bloquantes", result.blocking_count)
+                col_w.metric("🟡 Avertissements", result.warning_count)
+
+            st.error(
+                "❌ **Ce PDF sera automatiquement rejeté à partir du 1er septembre 2026.** "
+                f"Il présente **{result.blocking_count} point(s) bloquant(s)** à corriger."
+            )
+
+            st.divider()
+
+            # ── Rapport détaillé ──────────────────────────────────────────
+            st.markdown("#### 📋 Rapport de non-conformité")
+
+            blocking_issues = [i for i in result.issues if i.category == "bloquant"]
+            warning_issues = [i for i in result.issues if i.category == "warning"]
+
+            if blocking_issues:
+                st.markdown(
+                    "**🔴 Points bloquants — doivent être corrigés avant le 1er sept. 2026**"
+                )
+                for issue in blocking_issues:
+                    with st.expander(f"❌ [{issue.code}] {issue.label}", expanded=True):
+                        st.markdown(f"**Pourquoi c'est bloquant :**  \n{issue.explanation}")
+                        st.info(f"✏️ **Action corrective :** {issue.fix}")
+
+            if warning_issues:
+                st.markdown("**🟡 Points à surveiller — non bloquants mais risqués**")
+                for issue in warning_issues:
+                    with st.expander(f"⚠️ [{issue.code}] {issue.label}"):
+                        st.markdown(f"**Pourquoi c'est risqué :**  \n{issue.explanation}")
+                        st.info(f"✏️ **Recommandation :** {issue.fix}")
+
+            # ── Champs détectés ───────────────────────────────────────────
+            if result.detected:
+                with st.expander("🔍 Données détectées dans votre PDF", expanded=False):
+                    st.caption(
+                        "Ces informations ont été extraites heuristiquement. "
+                        "Elles ne sont pas validées — leur présence visuelle ne suffit pas "
+                        "pour être conforme à la réforme."
+                    )
+                    for k, v in result.detected.items():
+                        label = {
+                            "siret_candidats": "SIRET(s) détecté(s)",
+                            "tva_candidats": "N° TVA détecté(s)",
+                            "invoice_number": "Numéro de facture",
+                            "dates_candidates": "Date(s) détectée(s)",
+                            "montants_candidats": "Montant(s) détecté(s)",
+                        }.get(k, k)
+                        st.markdown(f"- **{label}** : `{v}`")
+
+            st.divider()
+
+            # ── CTA ───────────────────────────────────────────────────────
+            st.markdown(
+                """
+                <div style="
+                    background: linear-gradient(135deg, #003D73 0%, #005FAD 100%);
+                    border-radius: 12px;
+                    padding: 1.5rem 2rem;
+                    color: white;
+                    text-align: center;
+                ">
+                    <div style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem;">
+                        🚀 Prêt à convertir cette facture en format conforme 2026 ?
+                    </div>
+                    <div style="font-size: 0.9rem; opacity: 0.88;">
+                        Utilisez l'onglet <strong>📝 Générer une facture</strong> pour créer
+                        un Factur-X conforme, ou l'onglet <strong>🔄 Conversion XML Legacy</strong>
+                        si vous partez d'un XML existant.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # ── Scénarios d'erreur préchargés ─────────────────────────────────────
+    st.divider()
+    st.markdown("#### 🎬 Scénarios de démonstration")
+    st.caption(
+        "Pas de PDF sous la main ? Choisissez un scénario préconfiguré pour voir "
+        "le validateur en action avec des erreurs réelles."
+    )
+
+    scenarios = get_demo_scenarios()
+    selected_scenario = st.selectbox(
+        "Choisir un scénario",
+        options=list(scenarios.keys()),
+        key="demo_scenario_select",
+    )
+
+    if selected_scenario:
+        scenario = scenarios[selected_scenario]
+        tag = scenario.get("_demo_tag", "")
+        desc = scenario.get("_demo_description", "")
+        lines = scenario.get("_demo_lines", [("Prestation", 1.0, 100.0, 20.0)])
+
+        if tag == "ok":
+            st.success(f"✅ **Scénario nominal** — {desc}")
+        else:
+            st.error(f"❌ **Scénario d'erreur** — {desc}")
+
+        if st.button(
+            "▶️ Charger ce scénario dans l'onglet Générer",
+            type="primary",
+            key="load_scenario",
+        ):
+            # Stocker dans session_state pour pré-remplir Tab 1
+            st.session_state["scenario_form_data"] = {
+                k: v for k, v in scenario.items() if not k.startswith("_")
+            }
+            st.session_state["scenario_lines"] = lines
+            st.info(
+                "✅ Scénario chargé. "
+                "Allez dans **📝 Générer une facture**, cliquez **Générer** puis **Valider**."
+            )
 
 
 # ═══════════════════════════════════════════

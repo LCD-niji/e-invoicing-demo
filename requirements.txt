@@ -10,6 +10,7 @@ factur-x>=2.0.0
 reportlab>=4.0.0
 pikepdf>=8.0.0
 pypdf>=4.0
+pdfplumber>=0.10.0
 
 # Validation XSD officielle (optionnel mais recommandé)
 lxml>=4.9.0
