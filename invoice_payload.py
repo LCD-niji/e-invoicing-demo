@@ -143,9 +143,6 @@ def build_invoice_from_form(form_data: dict, lines_data: list, issue_date, due_d
     if not lines_data:
         missing.append("Au moins une ligne de facture est requise")
 
-    if missing:
-        return None, missing
-
     invoice = Invoice(
         number=str(form_data["invoice_number"]).strip(),
         issue_date=issue_date,
@@ -188,4 +185,6 @@ def build_invoice_from_form(form_data: dict, lines_data: list, issue_date, due_d
             for d, q, p, v in lines_data
         ],
     )
-    return invoice, []
+    # On ne bloque pas la création : l'objectif est de générer la facture
+    # même si des champs sont manquants, tout en laissant un warning.
+    return invoice, missing

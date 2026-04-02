@@ -39,7 +39,9 @@ class TestInvoicePayload(unittest.TestCase):
             profile="EN16931",
         )
 
-        self.assertIsNone(invoice)
+        # On ne bloque plus la création : l'objectif est de permettre la génération
+        # de la facture tout en exposant un warning à l'UI.
+        self.assertIsNotNone(invoice)
         self.assertTrue(any("Raison sociale vendeur" in err for err in errors))
         self.assertTrue(any("Numero de facture" in err for err in errors))
 

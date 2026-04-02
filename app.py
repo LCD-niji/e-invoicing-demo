@@ -348,19 +348,19 @@ SHOW_CHORUS_UI = False
 LEGACY_STEP_LABEL = "Parcours 5" if SHOW_CHORUS_UI else "Parcours 3"
 
 if SHOW_CHORUS_UI:
-    tab1, tab2, tab_audit, tab3, tab4, tab_legacy = st.tabs([
+    tab_audit, tab1, tab2, tab3, tab4, tab_legacy = st.tabs([
+        "🔍 Audit PDF",
         "📝 Générer une facture",
         "✅ Valider",
-        "🔍 Audit PDF",
         "📡 Dépôt Chorus Pro",
         "🔄 Suivi Chorus Pro",
         "🔄 Conversion XML Legacy",
     ])
 else:
-    tab1, tab2, tab_audit, tab_legacy = st.tabs([
+    tab_audit, tab1, tab2, tab_legacy = st.tabs([
+        "🔍 Audit PDF",
         "📝 Générer une facture",
         "✅ Valider",
-        "🔍 Audit PDF",
         "🔄 Conversion XML Legacy",
     ])
 
@@ -524,8 +524,7 @@ with tab1:
             )
             if missing_messages:
                 for msg in missing_messages:
-                    st.error(f"❌ {msg}")
-                st.stop()
+                    st.warning(f"⚠️ {msg}")
 
             # ── UBL 2.1 ───────────────────────────────────
             if "UBL" in syntax:

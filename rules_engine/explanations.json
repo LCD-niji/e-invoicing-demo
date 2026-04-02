@@ -1,0 +1,356 @@
+{
+  "BR-01": {
+    "label": "Identifiant de profil (SpecificationID) absent",
+    "explanation": "Chaque facture doit déclarer le profil de conformité qu'elle respecte (ex: urn:cen.eu:en16931:2017). Sans cet identifiant, la plateforme agréée ne sait pas selon quelle version des règles valider le document.",
+    "fix": "Ajouter le champ BT-24 avec la valeur urn:cen.eu:en16931:2017 (ou le profil CIUS FR adapté).",
+    "impact": "rejet_automatique"
+  },
+  "BR-02": {
+    "label": "Numéro de facture absent ou vide",
+    "explanation": "Le numéro unique de facture (BT-1) est obligatoire. Il permet l'identification, le rapprochement comptable et la détection des doublons par la DGFiP. Une facture sans numéro est juridiquement invalide.",
+    "fix": "Renseigner un numéro de facture séquentiel unique, par exemple FAC-2026-001. Ne jamais réutiliser un numéro.",
+    "impact": "rejet_automatique"
+  },
+  "BR-03": {
+    "label": "Date d'émission de la facture absente",
+    "explanation": "La date d'émission (BT-2) est un élément juridique obligatoire qui déclenche les délais de paiement légaux (Loi LME : 30 ou 60 jours). Sans elle, la facture est irrecevable comptablement.",
+    "fix": "Renseigner la date d'émission au format YYYYMMDD dans le champ BT-2.",
+    "impact": "rejet_automatique"
+  },
+  "BR-04": {
+    "label": "Type de facture (code) absent",
+    "explanation": "Le code de type de document (BT-3) indique s'il s'agit d'une facture (380), d'un avoir (381), d'une facture d'auto-facturation (389), etc. Sans ce code, le traitement automatique est impossible.",
+    "fix": "Renseigner BT-3 avec le code UNTDID 1001 approprié : 380 pour une facture standard, 381 pour un avoir.",
+    "impact": "rejet_automatique"
+  },
+  "BR-05": {
+    "label": "Devise de facturation absente",
+    "explanation": "Le code devise (BT-5) est obligatoire pour tous les montants de la facture. Son absence rend impossible tout traitement comptable ou de paiement automatisé.",
+    "fix": "Renseigner BT-5 avec le code ISO 4217 : EUR pour l'euro, USD pour le dollar, etc.",
+    "impact": "rejet_automatique"
+  },
+  "BR-06": {
+    "label": "Nom du vendeur absent",
+    "explanation": "La raison sociale du vendeur (BT-27) est une mention légale obligatoire sur toute facture française. Son absence invalide le document sur le plan fiscal et comptable.",
+    "fix": "Renseigner la dénomination sociale complète du vendeur dans le champ BT-27.",
+    "impact": "rejet_automatique"
+  },
+  "BR-07": {
+    "label": "Nom de l'acheteur absent",
+    "explanation": "La raison sociale de l'acheteur (BT-44) est obligatoire pour le routage de la facture vers la bonne entité dans la plateforme agréée et pour le rapprochement comptable côté client.",
+    "fix": "Renseigner la dénomination sociale complète de l'acheteur dans le champ BT-44.",
+    "impact": "rejet_automatique"
+  },
+  "BR-08": {
+    "label": "Adresse postale du vendeur absente",
+    "explanation": "L'adresse complète du vendeur (BG-5) est requise par la norme EN16931 et par le droit commercial français. Elle est utilisée pour les contrôles de résidence fiscale.",
+    "fix": "Renseigner au minimum la rue, le code postal, la ville et le pays du vendeur.",
+    "impact": "rejet_automatique"
+  },
+  "BR-09": {
+    "label": "Pays vendeur absent dans l'adresse",
+    "explanation": "Le code pays du vendeur (BT-40) conditionne les règles de TVA applicables (TVA française, autoliquidation, exonération export). Sans lui, le calcul de TVA ne peut pas être vérifié.",
+    "fix": "Renseigner le code pays ISO 3166-1 alpha-2 dans BT-40 : FR pour la France.",
+    "impact": "rejet_automatique"
+  },
+  "BR-10": {
+    "label": "Pays acheteur absent dans l'adresse",
+    "explanation": "Le code pays de l'acheteur (BT-55) détermine si la transaction relève de la TVA domestique, de l'autoliquidation intracommunautaire ou de l'export hors UE.",
+    "fix": "Renseigner le code pays ISO 3166-1 alpha-2 dans BT-55.",
+    "impact": "rejet_automatique"
+  },
+  "BR-11": {
+    "label": "Adresse postale de l'acheteur absente",
+    "explanation": "L'adresse de l'acheteur (BG-8) est obligatoire. Elle est utilisée pour le routage de la facture dans l'annuaire centralisé de la DGFiP et pour les contrôles fiscaux.",
+    "fix": "Renseigner au minimum le pays de l'acheteur (BT-55). La rue et la ville sont fortement recommandées.",
+    "impact": "rejet_automatique"
+  },
+  "BR-15": {
+    "label": "Quantité facturée absente sur une ligne",
+    "explanation": "Chaque ligne de facture doit comporter une quantité (BT-129). C'est la base du calcul du montant net de ligne et de la vérification des arrondis.",
+    "fix": "Renseigner la quantité dans BT-129. Pour les prestations forfaitaires, utiliser 1 avec l'unité ZZ (forfait).",
+    "impact": "rejet_automatique"
+  },
+  "BR-16": {
+    "label": "Montant net de ligne absent",
+    "explanation": "Le montant net HT de chaque ligne (BT-131) est obligatoire. Il est utilisé pour recalculer et vérifier la cohérence du total HT de la facture (règle BR-CO-10).",
+    "fix": "Renseigner le montant HT dans BT-131 : quantité × prix unitaire HT, arrondi à 2 décimales.",
+    "impact": "rejet_automatique"
+  },
+  "BR-17": {
+    "label": "Désignation de l'article ou service absente",
+    "explanation": "Le libellé de chaque ligne (BT-153) est obligatoire. Il décrit la nature de la prestation ou du bien vendu, indispensable pour la déductibilité de la TVA.",
+    "fix": "Renseigner une désignation claire et précise dans BT-153 pour chaque ligne de facture.",
+    "impact": "non_deductibilite_tva"
+  },
+  "BR-21": {
+    "label": "Code unité de mesure absent sur une ligne",
+    "explanation": "Le code unité (BT-130) doit être présent pour chaque ligne (ex: H87 pour pièce, HUR pour heure, ZZ pour forfait). Il est nécessaire pour l'interprétation automatique de la quantité.",
+    "fix": "Renseigner le code unité dans BT-130 selon la liste UNECE Rec 20. Utiliser ZZ pour les forfaits.",
+    "impact": "rejet_automatique"
+  },
+  "BR-22": {
+    "label": "Unité de mesure (libellé) absente",
+    "explanation": "En complément du code, le libellé de l'unité doit être présent ou déductible. Cela garantit la lisibilité humaine et la conformité à la norme.",
+    "fix": "S'assurer que le code unité BT-130 est valide selon la liste UNECE Rec 20.",
+    "impact": "rejet_automatique"
+  },
+  "BR-31": {
+    "label": "Identifiant TVA vendeur absent",
+    "explanation": "Le numéro de TVA intracommunautaire du vendeur (BT-31) ou celui de son représentant fiscal est obligatoire pour toute facture B2B assujettie à la TVA. C'est le sésame pour la déductibilité TVA de l'acheteur.",
+    "fix": "Renseigner le numéro de TVA au format FRxx xxxxxxxxx dans BT-31.",
+    "impact": "non_deductibilite_tva"
+  },
+  "BR-32": {
+    "label": "Format du N° TVA vendeur invalide (préfixe pays manquant)",
+    "explanation": "Le numéro de TVA (BT-31) doit obligatoirement commencer par le code pays ISO (ex: FR, DE, BE). Un numéro sans préfixe ne peut pas être validé par les systèmes européens.",
+    "fix": "S'assurer que le numéro de TVA commence bien par FR pour une entreprise française.",
+    "impact": "rejet_automatique"
+  },
+  "BR-33": {
+    "label": "Format du N° TVA acheteur invalide (préfixe pays manquant)",
+    "explanation": "Même exigence que pour le vendeur : le numéro de TVA de l'acheteur (BT-48) doit commencer par le code pays. Cela conditionne le traitement de l'autoliquidation intracommunautaire.",
+    "fix": "Vérifier que BT-48 commence par le code pays ISO à 2 lettres.",
+    "impact": "rejet_automatique"
+  },
+  "BR-36": {
+    "label": "Mode de paiement non renseigné",
+    "explanation": "Le code moyen de paiement (BT-81) est obligatoire dès qu'un bloc de paiement est présent. Il indique si le règlement se fait par virement (30), prélèvement (59), carte (48), chèque (20), etc.",
+    "fix": "Renseigner BT-81 avec le code UNTDID 4461 correspondant au mode de paiement prévu.",
+    "impact": "retard_paiement"
+  },
+  "BR-41": {
+    "label": "Numéro de carte bancaire absent",
+    "explanation": "Si le mode de paiement est par carte (code 48), le numéro primaire de compte (BT-87, généralement les 4 derniers chiffres) est obligatoire pour la traçabilité.",
+    "fix": "Renseigner au minimum les 4 derniers chiffres du numéro de carte dans BT-87.",
+    "impact": "rejet_automatique"
+  },
+  "BR-47": {
+    "label": "IBAN absent pour un paiement par virement",
+    "explanation": "Lorsque le mode de paiement est le virement bancaire (code 30 ou 58), l'identifiant du compte à créditer (BT-84, généralement l'IBAN) est obligatoire. Sans IBAN, le paiement automatique est impossible.",
+    "fix": "Renseigner l'IBAN du compte vendeur dans BT-84.",
+    "impact": "retard_paiement"
+  },
+  "BR-49": {
+    "label": "Nom du titulaire du compte de paiement absent",
+    "explanation": "Le nom associé au compte de paiement (BT-85) est requis pour sécuriser le virement et éviter les erreurs de bénéficiaire.",
+    "fix": "Renseigner la raison sociale ou le nom du titulaire du compte dans BT-85.",
+    "impact": "retard_paiement"
+  },
+  "BR-50": {
+    "label": "Référence mandat de prélèvement absente",
+    "explanation": "Pour un paiement par prélèvement SEPA (code 59), la référence unique du mandat (BT-89) est obligatoire. Elle prouve l'autorisation de débit donnée par le débiteur.",
+    "fix": "Renseigner la référence unique du mandat SEPA dans BT-89.",
+    "impact": "rejet_automatique"
+  },
+  "BR-52": {
+    "label": "Référence d'un document justificatif absente",
+    "explanation": "Tout document annexe (bon de commande, contrat, BL) référencé dans la facture doit avoir un identifiant (BT-122). Sans référence, le lien avec le document source est perdu.",
+    "fix": "Renseigner l'identifiant du document justificatif dans BT-122.",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-55": {
+    "label": "Avoir sans référence à la facture d'origine",
+    "explanation": "Un avoir (TypeCode 381) doit impérativement référencer la facture qu'il annule ou corrige (BT-25). Sans cette référence, l'avoir ne peut pas être rapproché comptablement et sa validité fiscale est contestable.",
+    "fix": "Renseigner le numéro de la facture d'origine dans BT-25 (Preceding Invoice Reference).",
+    "impact": "rejet_automatique"
+  },
+  "BR-57": {
+    "label": "Période de facturation incohérente (début > fin)",
+    "explanation": "La date de début de la période facturée (BT-73) doit être antérieure ou égale à la date de fin (BT-74). Une inversion de dates indique une erreur de saisie qui invalide la période.",
+    "fix": "Vérifier et corriger les dates de début et de fin de période pour chaque ligne concernée.",
+    "impact": "rejet_automatique"
+  },
+  "BR-61": {
+    "label": "Avoir (code 381) sans facture d'origine référencée",
+    "explanation": "Identique à BR-55 : tout document de type avoir (381) ou note de crédit doit impérativement pointer vers la facture qu'il corrige. C'est une exigence fiscale et comptable en France.",
+    "fix": "Ajouter la référence de la facture annulée dans le bloc Preceding Invoice (BT-25).",
+    "impact": "rejet_automatique"
+  },
+  "BR-63": {
+    "label": "Motif de frais au niveau document absent",
+    "explanation": "Tout frais ajouté au niveau de la facture (BG-21) doit être accompagné d'un motif (BT-104) ou d'un code de motif (BT-105). Sans justification, le frais peut être contesté.",
+    "fix": "Renseigner le motif du frais dans BT-104 (texte libre) ou BT-105 (code UNTDID 7161).",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-64": {
+    "label": "Motif de remise au niveau document absent",
+    "explanation": "Toute remise accordée au niveau de la facture (BG-20) doit être justifiée par un motif (BT-97) ou un code motif (BT-98). Cela est nécessaire pour la traçabilité des conditions commerciales.",
+    "fix": "Renseigner le motif de la remise dans BT-97 (texte libre) ou BT-98 (code UNTDID 5189).",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-65": {
+    "label": "Montant de frais négatif non autorisé",
+    "explanation": "Un frais au niveau document (BT-99) ne peut pas être négatif. Un montant négatif doit être traité comme une remise (BG-20) et non comme un frais.",
+    "fix": "Si le montant est négatif, le déplacer dans le bloc Remise (BG-20) plutôt que dans Frais (BG-21).",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-03": {
+    "label": "Total TVA incohérent avec la somme des ventilations",
+    "explanation": "Le total TVA de la facture (BT-110) doit être égal à la somme des montants TVA par taux (BT-117 de chaque BG-23). Toute différence, même de 1 centime, déclenche un rejet.",
+    "fix": "Vérifier que chaque ventilation TVA (par taux) est correctement calculée et que leur somme égale le total TVA.",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-05": {
+    "label": "Total HT incohérent avec la somme des bases TVA",
+    "explanation": "Le total HT de la facture doit correspondre à la somme de toutes les bases imposables par taux de TVA. Un écart révèle une ligne ou une remise mal imputée à une catégorie TVA.",
+    "fix": "Vérifier l'affectation de chaque ligne et remise à sa catégorie TVA, et recalculer les bases.",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-09": {
+    "label": "Aucun identifiant fiscal vendeur présent",
+    "explanation": "Au moins l'un des trois identifiants doit être présent : numéro de TVA vendeur (BT-31), numéro de TVA du représentant fiscal (BT-63) ou identifiant fiscal national (BT-32). Sans identifiant, la DGFiP ne peut pas rattacher la facture à un contribuable.",
+    "fix": "Renseigner au minimum le numéro de TVA intracommunautaire du vendeur dans BT-31.",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-10": {
+    "label": "Somme des lignes ≠ total HT facture",
+    "explanation": "La somme des montants nets HT de toutes les lignes (BT-131) augmentée des frais et diminuée des remises doit être égale au total HT de la facture (BT-109). Toute différence indique une erreur arithmétique.",
+    "fix": "Recalculer le total HT en additionnant tous les montants nets de lignes, puis ajouter les frais et soustraire les remises.",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-13": {
+    "label": "Total TTC mal calculé",
+    "explanation": "Le total TTC (BT-112) doit être égal au total HT (BT-109) plus le total TVA (BT-110) plus les arrondis éventuels (BT-114). Un écart, même minime, provoque un rejet automatique.",
+    "fix": "Vérifier le calcul : TTC = HT + TVA + arrondi. Utiliser 2 décimales et contrôler les arrondis.",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-15": {
+    "label": "Incohérence HT + TVA ≠ TTC",
+    "explanation": "C'est l'erreur arithmétique la plus fréquente en facturation. Le total TTC doit être strictement égal au total HT + total TVA (+ arrondi optionnel). Les arrondis incorrects sur les lignes sont la cause principale.",
+    "fix": "Arrondir chaque montant de ligne à 2 décimales, recalculer les totaux HT et TVA, puis vérifier que HT + TVA = TTC.",
+    "impact": "rejet_automatique"
+  },
+  "BR-CO-16": {
+    "label": "Montant dû incohérent",
+    "explanation": "Le montant net à payer (BT-115) doit être calculé ainsi : TTC - acomptes déjà versés (BT-113) + arrondi (BT-114). Un écart bloque le traitement de paiement automatique.",
+    "fix": "Vérifier le calcul du montant dû : TTC moins tout acompte éventuellement renseigné.",
+    "impact": "retard_paiement"
+  },
+  "BR-CO-25": {
+    "label": "Date d'échéance ou conditions de paiement absentes",
+    "explanation": "Lorsque le montant à payer est positif, la date d'échéance (BT-9) ou les conditions de paiement (BT-20) doivent être présentes. Sans cette information, le délai de paiement légal (30 ou 60 jours) ne peut pas être calculé.",
+    "fix": "Renseigner la date d'échéance dans BT-9 ou décrire les conditions de paiement dans BT-20.",
+    "impact": "retard_paiement"
+  },
+  "BR-AE-01": {
+    "label": "Ventilation TVA autoliquidation (AE) absente ou multiple",
+    "explanation": "Si une ou plusieurs lignes portent le code TVA AE (autoliquidation), la facture doit contenir exactement un bloc de ventilation TVA avec ce code. En cas d'autoliquidation, c'est l'acheteur qui déclare et déduit la TVA.",
+    "fix": "Créer un unique bloc BG-23 avec CategoryCode=AE, TaxableAmount = base HT autoliquidée, TaxAmount = 0.",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-E-01": {
+    "label": "Ventilation TVA exonération (E) absente ou multiple",
+    "explanation": "Pour les livraisons ou prestations exonérées de TVA (code E), il doit exister exactement une ventilation TVA de type E. Elle justifie l'absence de collecte de TVA et doit être accompagnée d'une mention légale d'exonération.",
+    "fix": "Créer un unique bloc BG-23 avec CategoryCode=E et TaxAmount=0. Ajouter la mention légale d'exonération (BT-120).",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-G-01": {
+    "label": "Ventilation TVA export (G) absente ou multiple",
+    "explanation": "Pour les exportations hors UE (code G), une et une seule ventilation TVA de type G doit être présente. Ces opérations sont exonérées de TVA mais soumises à l'e-reporting DGFiP.",
+    "fix": "Créer un unique bloc BG-23 avec CategoryCode=G et TaxAmount=0.",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-O-01": {
+    "label": "Ventilation TVA hors champ (O) absente ou multiple",
+    "explanation": "Pour les opérations hors champ TVA (code O), une ventilation unique de type O est requise. Ces cas incluent certaines subventions, indemnités ou opérations non soumises à la TVA.",
+    "fix": "Créer un unique bloc BG-23 avec CategoryCode=O et TaxAmount=0.",
+    "impact": "risque_controle_fiscal"
+  },
+  "BR-S-01": {
+    "label": "Ventilation TVA au taux standard (S) absente",
+    "explanation": "Si au moins une ligne porte le code TVA standard (S : 20%, 10%, 5.5% ou 2.1% en France), au moins une ventilation TVA de type S doit exister avec le taux et le montant correspondants.",
+    "fix": "Ajouter un bloc BG-23 pour chaque taux de TVA standard utilisé, avec CategoryCode=S, le taux et le montant de TVA calculé.",
+    "impact": "rejet_automatique"
+  },
+  "BR-Z-01": {
+    "label": "Ventilation TVA taux zéro (Z) absente ou multiple",
+    "explanation": "Pour les opérations à TVA à taux zéro (code Z, différent de l'exonération E), une ventilation unique de type Z est requise avec TaxAmount = 0.",
+    "fix": "Créer un unique bloc BG-23 avec CategoryCode=Z, le taux à 0% et TaxAmount=0.",
+    "impact": "risque_controle_fiscal"
+  },
+  "BT-9": {
+    "label": "Date d'échéance de paiement non renseignée",
+    "explanation": "L'absence de date d'échéance (BT-9) ne bloque pas techniquement la facture mais empêche le calcul automatique des délais de paiement (Loi LME). Cela peut entraîner des retards ou des litiges.",
+    "fix": "Renseigner la date d'échéance dans BT-9 ou les conditions de paiement dans BT-20.",
+    "impact": "retard_paiement"
+  },
+  "BT-20": {
+    "label": "Conditions de paiement non renseignées",
+    "explanation": "Les conditions de paiement (BT-20) permettent de préciser les modalités : escompte pour paiement rapide, pénalités de retard, etc. Leur absence peut générer des litiges commerciaux.",
+    "fix": "Renseigner le texte décrivant les conditions de paiement dans BT-20.",
+    "impact": "retard_paiement"
+  },
+  "BT-22": {
+    "label": "Note de facture non renseignée",
+    "explanation": "BT-22 est un champ optionnel de note libre. Il peut contenir des mentions légales complémentaires, des références de projet ou des instructions spécifiques à l'acheteur.",
+    "fix": "Ce champ est optionnel. L'utiliser uniquement si des informations complémentaires doivent figurer sur la facture.",
+    "impact": "risque_controle_fiscal"
+  },
+  "BT-25": {
+    "label": "Référence facture précédente absente",
+    "explanation": "Pour les avoirs et factures rectificatives, la référence de la facture d'origine (BT-25) est obligatoire (voir BR-55). Pour les factures normales, ce champ reste optionnel.",
+    "fix": "Renseigner le numéro de la facture originale pour tout avoir ou facture rectificative.",
+    "impact": "rejet_automatique"
+  },
+  "FR-01": {
+    "label": "SIRET vendeur absent ou invalide (14 chiffres requis)",
+    "explanation": "Le SIRET du vendeur (14 chiffres) est obligatoire pour toutes les factures B2B françaises selon l'Annexe 7 DGFiP. Il permet l'identification légale du vendeur dans l'annuaire centralisé et conditionne le routage par la Plateforme Agréée.",
+    "fix": "Renseigner le SIRET à 14 chiffres du vendeur. Le SIRET = SIREN (9 chiffres) + NIC (5 chiffres). Vérifiable sur societe.com ou INSEE.",
+    "impact": "rejet_automatique"
+  },
+  "FR-02": {
+    "label": "SIRET acheteur absent ou invalide",
+    "explanation": "Le SIRET de l'acheteur est requis par la DGFiP pour le routage automatique de la facture vers la bonne entité via l'annuaire centralisé. Sans lui, la plateforme agréée ne peut pas délivrer la facture.",
+    "fix": "Renseigner le SIRET à 14 chiffres de l'acheteur. Pour un client qui refuse de le communiquer, utiliser le SIREN à 9 chiffres en fallback.",
+    "impact": "rejet_automatique"
+  },
+  "FR-03": {
+    "label": "Format N° TVA vendeur non conforme (FRxx xxxxxxxxx)",
+    "explanation": "Le numéro de TVA intracommunautaire français doit respecter le format : FR + 2 caractères alphanumériques (clé) + 9 chiffres (SIREN). Un format incorrect entraîne l'échec des contrôles DGFiP.",
+    "fix": "Vérifier le format : FR suivi de 2 caractères puis 9 chiffres, sans espace (ex: FR12345678901). Calculer la clé : (12 + 3 × SIREN) mod 97.",
+    "impact": "rejet_automatique"
+  },
+  "FR-04": {
+    "label": "Nature de l'opération (bien/service/mixte) non renseignée",
+    "explanation": "La DGFiP exige la qualification de la nature de l'opération pour les besoins de l'e-reporting et des contrôles fiscaux : vente de biens, prestation de services, ou opération mixte. Cette information conditionne le traitement TVA.",
+    "fix": "Renseigner la nature dans BT-19 (Buyer accounting reference) ou via les codes de catégorie de ligne. Utiliser : 1 pour biens, 2 pour services, 3 pour mixte.",
+    "impact": "risque_controle_fiscal"
+  },
+  "FR-05": {
+    "label": "Adresse de livraison absente alors qu'elle diffère de la facturation",
+    "explanation": "Lorsque l'adresse de livraison des biens ou de réalisation de la prestation est différente de l'adresse de facturation, elle doit être renseignée (BG-13). Cela impact la détermination du lieu de taxation TVA.",
+    "fix": "Renseigner le bloc Delivery (BG-13) avec l'adresse effective de livraison ou de réalisation de la prestation.",
+    "impact": "risque_controle_fiscal"
+  },
+  "FR-10": {
+    "label": "Code moyen de paiement non conforme à la liste UNTDID 4461",
+    "explanation": "La DGFiP impose l'utilisation des codes officiels UNTDID 4461 pour les moyens de paiement. Les valeurs libres ou non standardisées sont rejetées par les plateformes agréées.",
+    "fix": "Utiliser uniquement les codes normalisés : 10 (espèces), 20 (chèque), 30 (virement), 48 (carte), 49 (prélèvement), 58 (SEPA Credit Transfer), 59 (SEPA Direct Debit).",
+    "impact": "rejet_automatique"
+  },
+  "FR-11": {
+    "label": "IBAN obligatoire pour un paiement par virement SEPA",
+    "explanation": "Pour les virements SEPA (codes 30 ou 58), l'IBAN du compte vendeur est obligatoire selon les exigences françaises. Sans IBAN valide, le paiement automatisé est impossible et les délais légaux ne peuvent être respectés.",
+    "fix": "Renseigner l'IBAN français (27 caractères commençant par FR) dans BT-84.",
+    "impact": "retard_paiement"
+  },
+  "FR-20": {
+    "label": "Profil minimum EN16931 non respecté",
+    "explanation": "La réforme française 2026 exige au minimum le profil EN16931 (CIUS FR). Les profils inférieurs (MINIMUM, BASIC WL, BASIC) ne sont pas acceptés pour les échanges B2B soumis à la facturation électronique obligatoire.",
+    "fix": "Passer au profil EN16931 : urn:cen.eu:en16931:2017 avec la CIUS française urn:factur-x.eu:1p0:en16931.",
+    "impact": "rejet_automatique"
+  },
+  "FR-E-REPORT-01": {
+    "label": "Transaction B2C soumise à e-reporting non déclarée",
+    "explanation": "Les ventes aux particuliers (B2C) ne transitent pas par les plateformes agréées, mais les données agrégées doivent être transmises à la DGFiP via l'e-reporting (périodicité mensuelle ou hebdomadaire selon le volume). L'absence de transmission est passible d'amende.",
+    "fix": "Mettre en place le flux d'e-reporting B2C : transmission des données de transaction agrégées à la DGFiP selon le calendrier prévu.",
+    "impact": "amende"
+  },
+  "FR-E-REPORT-02": {
+    "label": "Transaction internationale (export/UE) soumise à e-reporting non déclarée",
+    "explanation": "Les transactions avec des clients étrangers (export hors UE, livraisons intracommunautaires) ne transitent pas par les PA mais doivent faire l'objet d'un e-reporting à la DGFiP. Cela inclut les prestations de services aux assujettis étrangers.",
+    "fix": "Inclure ces transactions dans le flux d'e-reporting international. Distinguer les livraisons intracommunautaires (TVA à 0% code G) des exports (hors champ UE).",
+    "impact": "amende"
+  }
+}
