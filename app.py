@@ -372,7 +372,7 @@ with tab1:
     st.markdown(
         """
         <div class="section-header">
-          <div class="step-label">Parcours 1</div>
+          <div class="step-label">Étape 1</div>
           <div class="step-title">Génération guidée</div>
           <p class="step-desc">Saisissez vos données métier et produisez un document prêt à validation.</p>
         </div>
@@ -613,7 +613,7 @@ with tab2:
     st.markdown(
         """
         <div class="section-header">
-          <div class="step-label">Parcours 2</div>
+          <div class="step-label">Étape 2</div>
           <div class="step-title">Validation unifiée</div>
           <p class="step-desc">Obtenez un statut global, des explications lisibles et des actions de correction.</p>
         </div>
@@ -1166,7 +1166,7 @@ with tab_audit:
     st.markdown(
         """
         <div class="section-header">
-            <div class="step-label">Étape 1 — Analyse</div>
+            <div class="step-label">Étape 0 — Analyse</div>
             <div class="step-title">Audit de votre facture PDF</div>
             <p class="step-desc">
                 Déposez un PDF reçu aujourd’hui (par email, portail, etc.). L’outil
@@ -1488,7 +1488,7 @@ with tab_legacy:
     st.markdown(
         f"""
         <div class="section-header">
-          <div class="step-label">{LEGACY_STEP_LABEL}</div>
+          <div class="step-label">Étape Annexe</div>
           <div class="step-title">Import XML legacy</div>
           <p class="step-desc">Mappez, normalisez et corrigez vos données externes en toute transparence.</p>
         </div>
