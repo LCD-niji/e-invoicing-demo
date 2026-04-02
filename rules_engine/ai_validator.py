@@ -5,7 +5,7 @@ Moteur de validation basé sur rules.json (Annexe 7 DGFiP v1.8).
 Supporte CII (XPath natif) et UBL 2.1 (via bt_override depuis ubl_mapper).
 Couverture :
   - Présence     : nœud XPath existe et a une valeur
-  - Format       : SIRET (14 chiffres), TVA FR, date YYYYMMDD ou YYYY-MM-DD, ISO
+  - Format       : SIREN BT-30/BT-47 (9 chiffres), SIRET autres cas, TVA FR, date YYYYMMDD ou YYYY-MM-DD, ISO
   - Codelist     : TypeCode, CategoryCode TVA, CountryID
   - Conditionnel : TypeCode, catégorie TVA, BT trigger absent
   - Calcul       : délégués au Schematron CEN (champ "formula" présent)
@@ -105,6 +105,7 @@ CODELISTS: dict[str, set] = {
 
 # ── Patterns de format ─────────────────────────────────────
 FORMAT_CHECKS: dict[str, tuple[str, str]] = {
+    "siren":  (r"^\d{9}$",                           "9 chiffres (SIREN — Annexe 7 DGFiP BT-30/BT-47)"),
     "siret":  (r"^\d{14}$",                          "14 chiffres (SIREN 9 + NIC 5)"),
     "tva_fr": (r"^FR[A-Z0-9]{2}\d{9}$",              "FR + 2 caractères + 9 chiffres"),
     "date8":  (r"^\d{8}$|^\d{4}-\d{2}-\d{2}$",       "Format YYYYMMDD ou YYYY-MM-DD"),
@@ -115,7 +116,10 @@ FORMAT_CHECKS: dict[str, tuple[str, str]] = {
 
 def _detect_format(bt: str, desc: str) -> Optional[str]:
     d = desc.lower()
-    if bt in ("BT-30", "BT-47") or "siret" in d:               return "siret"
+    if bt in ("BT-30", "BT-47"):
+        return "siren"
+    if "siret" in d:
+        return "siret"
     if bt in ("BT-31", "BT-48") or ("tva" in d and "fr" in d): return "tva_fr"
     if bt in ("BT-2", "BT-72", "BT-73", "BT-74"):              return "date8"
     if bt in ("BT-5",):                                         return "iso3"

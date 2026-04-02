@@ -51,7 +51,7 @@
                  "suppliername","nomvendeur","fournisseurnom","vendeur"]
   },
   "BT-30": {
-    "label": "SIRET vendeur",
+    "label": "SIREN vendeur (BT-30)",
     "patterns": ["siretfournisseur","siretvendeur","sellersiret","suppliersiret",
                  "nusiretfournisseur","siret","siren"]
   },
@@ -86,7 +86,7 @@
                  "nomacheteur","clientnom","acheteur","societe"]
   },
   "BT-47": {
-    "label": "SIRET acheteur",
+    "label": "SIREN acheteur (BT-47)",
     "patterns": ["siretclient","siretacheteur","buyersiret","customersiret",
                  "nusiretclient","siretdest"]
   },
@@ -94,6 +94,15 @@
     "label": "Identifiant électronique acheteur",
     "patterns": ["emailclient","electronicaddressclient","buyereladdress",
                  "adresseelectroniqueclient"]
+  },
+  "BT-50": {
+    "label": "Rue / ligne 1 acheteur",
+    "patterns": ["adrclient","rueclient","adresseclient","buyerstreet","streetclient",
+                 "ligne1client","voieclient"]
+  },
+  "BT-54": {
+    "label": "Code postal acheteur",
+    "patterns": ["cpclient","codepostalclient","buyerpostal","zipclient","postalclient"]
   },
   "BT-53": {
     "label": "Ville acheteur",

@@ -111,7 +111,7 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
                 f"<b>{invoice.seller.name}</b><br/>"
                 f"{invoice.seller.address.street}<br/>"
                 f"{invoice.seller.address.postal_code} {invoice.seller.address.city}<br/>"
-                f"SIRET : {invoice.seller.siret or '—'}<br/>"
+                f"SIREN : {invoice.seller.siret or '—'}<br/>"
                 f"TVA : {invoice.seller.vat_number or '—'}",
                 small_style
             ),
@@ -119,7 +119,7 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
                 f"<b>{invoice.buyer.name}</b><br/>"
                 f"{invoice.buyer.address.street}<br/>"
                 f"{invoice.buyer.address.postal_code} {invoice.buyer.address.city}<br/>"
-                f"SIRET : {invoice.buyer.siret or '—'}",
+                f"SIREN : {invoice.buyer.siret or '—'}",
                 small_style
             ),
             Paragraph(

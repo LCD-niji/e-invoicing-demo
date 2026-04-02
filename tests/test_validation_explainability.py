@@ -12,9 +12,9 @@ class TestValidationExplainability(unittest.TestCase):
         text = explain_issue_plain_language("X-TEST", "Avertissement", "warning")
         self.assertIn("pas bloquant", text.lower())
 
-    def test_remediation_for_siret_message(self):
-        text = remediation_guidance("FR-01", "SIRET invalide")
-        self.assertIn("14 chiffres", text)
+    def test_remediation_for_siren_fr01(self):
+        text = remediation_guidance("FR-01", "SIREN vendeur invalide")
+        self.assertIn("9 chiffres", text)
 
     def test_remediation_for_calculation_rule(self):
         text = remediation_guidance("BR-CO-15", "Incoherence arithmetique")

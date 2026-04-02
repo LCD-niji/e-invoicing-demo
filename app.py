@@ -1,6 +1,8 @@
 # ═══════════════════════════════════════════
 # CONFIGURATION & IMPORTS
 # ═══════════════════════════════════════════
+import hashlib
+import html
 import re
 import time
 from datetime import date, timedelta
@@ -16,13 +18,90 @@ from generate_pdf        import render_invoice_pdf
 from generate_facturx    import build_facturx, extract_xml_from_facturx
 from schematron_validator import validate_en16931, detect_syntax
 from rules_engine.ai_validator import AiValidator
-from convert_legacy      import extract_from_xml, make_sample_legacy_xml, ExtractionResult
+from convert_legacy      import (
+    extract_from_xml,
+    get_active_bt_list,
+    make_sample_legacy_xml,
+    ExtractionResult,
+    _parse_date as _legacy_parse_date,
+)
 from send_chorus         import simulate_submission, simulate_status_progression, CHORUS_STATUS
 from invoice_payload     import build_invoice_from_form, get_preloaded_examples, get_demo_scenarios
 from validation_explainability import explain_issue_plain_language, remediation_guidance
 from xml_import_helpers import decode_uploaded_xml, parse_xml_safely
 from pdf_legacy_analyzer import analyze_plain_pdf
 
+
+def _normalize_siren_bt(raw: str) -> str:
+    """SIREN BT-30/BT-47 (9 chiffres). Un SIRET (14 chiffres) saisi est ramené aux 9 premiers chiffres."""
+    d = re.sub(r"\D", "", raw or "")
+    if len(d) == 14:
+        return d[:9]
+    return d
+
+
+LEGACY_BT_BUCKETS = [
+    ("📋 Facture & références", {"BT-1", "BT-2", "BT-3", "BT-5", "BT-9", "BT-10", "BT-12", "BT-13", "BT-22"}),
+    ("🏢 Vendeur", {"BT-27", "BT-30", "BT-31", "BT-35", "BT-37", "BT-38", "BT-40", "BT-84", "BT-86"}),
+    ("🏭 Acheteur", {"BT-44", "BT-47", "BT-48", "BT-50", "BT-53", "BT-54", "BT-55"}),
+    ("📦 Lignes & TVA", {"BT-126", "BT-129", "BT-146", "BT-151", "BT-153"}),
+]
+
+
+def _legacy_xml_fingerprint(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
+
+
+def _legacy_reset_overrides_if_new_xml(fp: str) -> None:
+    if st.session_state.get("legacy_xml_fingerprint") != fp:
+        st.session_state.legacy_xml_fingerprint = fp
+        st.session_state.legacy_bt_overrides = {}
+
+
+def _legacy_form_value(bt: str, extracted: ExtractionResult, property_fallback: str = "") -> str:
+    """Overrides session > mapped[bt] > propriété métier (ex. invoice_number)."""
+    ov = st.session_state.get("legacy_bt_overrides", {}).get(bt)
+    if ov is not None and str(ov).strip() != "":
+        return str(ov)
+    mapped = extracted.mapped.get(bt, "")
+    if mapped:
+        return mapped
+    return property_fallback
+
+
+def _group_legacy_bt_entries(bt_entries: list[dict]) -> list[tuple[str, list[dict]]]:
+    by_code = {x["bt"]: x for x in bt_entries}
+    out: list[tuple[str, list[dict]]] = []
+    seen: set[str] = set()
+    for title, bset in LEGACY_BT_BUCKETS:
+        chunk = [by_code[bt] for bt in sorted(bset) if bt in by_code]
+        if chunk:
+            out.append((title, chunk))
+            seen |= {x["bt"] for x in chunk}
+    rest = [by_code[bt] for bt in sorted(by_code.keys()) if bt not in seen]
+    if rest:
+        out.append(("Autres champs actifs", rest))
+    return out
+
+
+def _apply_legacy_tile_mapping(unmatched_fields: dict[str, str], bt_entries: list[dict]) -> None:
+    """Lit les selectbox de cibles et met à jour legacy_bt_overrides."""
+    base = dict(st.session_state.get("legacy_bt_overrides", {}))
+    for bt_ent in bt_entries:
+        bt = bt_ent["bt"]
+        sel = st.session_state.get(f"legacy_map_tgt_{bt}", "—")
+        if not sel or sel == "—":
+            base.pop(bt, None)
+            continue
+        raw = unmatched_fields.get(sel, "").strip()
+        if not raw:
+            continue
+        if bt in ("BT-2", "BT-9"):
+            raw = _legacy_parse_date(raw)
+        if bt in ("BT-30", "BT-47"):
+            raw = _normalize_siren_bt(raw)
+        base[bt] = raw
+    st.session_state.legacy_bt_overrides = base
 
 
 # ── Page config ───────────────────────────────────────────
@@ -309,8 +388,47 @@ st.markdown(
     }
 
     /* ═══════════════════════════════════════
+       LEGACY XML — tuiles sources / cibles
+       ═══════════════════════════════════════ */
+    .legacy-tile-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 0.5rem 0 1.2rem 0;
+    }
+    .legacy-tile-source {
+        flex: 1 1 160px;
+        max-width: 240px;
+        border: 1px solid #D7E3F0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: linear-gradient(160deg, #F8FAFC 0%, #FFFFFF 100%);
+        box-shadow: 0 1px 3px rgba(0,60,120,0.06);
+    }
+    .legacy-tile-tag {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #005FAD;
+        word-break: break-all;
+    }
+    .legacy-tile-val {
+        font-size: 0.8rem;
+        color: #475569;
+        margin-top: 6px;
+        display: block;
+        line-height: 1.35;
+    }
+    .legacy-tile-target-h {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: #1B4332;
+        margin-bottom: 4px;
+    }
+
+    /* ═══════════════════════════════════════
        FOOTER
-    ═══════════════════════════════════════ */
+       ═══════════════════════════════════════ */
     .app-footer {
         text-align: center;
         padding: 1.5rem 0 0.5rem 0;
@@ -385,7 +503,7 @@ with tab1:
         "à partir de vos données métier."
     )
     st.info(
-        "Conseil d'utilisation : renseignez d'abord les identifiants légaux (SIRET, TVA), "
+        "Conseil d'utilisation : renseignez d'abord les identifiants légaux (SIREN BT-30/BT-47, TVA), "
         "puis les lignes de facturation. En cas d'information manquante, l'outil génère quand même "
         "le document et signale les points à compléter."
     )
@@ -429,7 +547,7 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         seller_name   = st.text_input("Raison sociale",   preloaded_example["seller_name"])
-        seller_siret  = st.text_input("SIRET",            preloaded_example["seller_siret"])
+        seller_siret  = st.text_input("SIREN vendeur (9 chiffres, BT-30)", preloaded_example["seller_siret"])
         seller_vat    = st.text_input("N° TVA",           preloaded_example["seller_vat"])
         seller_iban   = st.text_input("IBAN",             preloaded_example["seller_iban"])
         seller_bic    = st.text_input("BIC",              preloaded_example["seller_bic"])
@@ -447,7 +565,7 @@ with tab1:
     col3, col4 = st.columns(2)
     with col3:
         buyer_name    = st.text_input("Raison sociale",  preloaded_example["buyer_name"], key="buyer_name")
-        buyer_siret   = st.text_input("SIRET",           preloaded_example["buyer_siret"], key="buyer_siret")
+        buyer_siret   = st.text_input("SIREN acheteur (9 chiffres, BT-47)", preloaded_example["buyer_siret"], key="buyer_siret")
         buyer_vat     = st.text_input("N° TVA",          preloaded_example["buyer_vat"], key="buyer_vat")
         buyer_street  = st.text_input("Rue",             preloaded_example["buyer_street"], key="buyer_street")
     with col4:
@@ -800,7 +918,7 @@ with tab2:
             "BR-25":"Nom article (BT-153) obligatoire",
             "BR-26":"Code TVA ligne (BT-151) obligatoire",
             "BR-27":"Prix unitaire net (BT-146) obligatoire",
-            "BR-31":"Vendeur : SIRET ou TVA intracommunautaire obligatoire",
+            "BR-31":"Vendeur : identifiant légal (SIREN) ou TVA intracommunautaire obligatoire",
             "BR-36":"Adresse vendeur — ville (BT-37) obligatoire",
             "BR-37":"Adresse vendeur — code postal (BT-38) obligatoire",
             "BR-43":"BT-110 = somme des BT-117",
@@ -900,7 +1018,7 @@ with tab2:
         st.caption(
             "La DGFiP a publié 235 règles de gestion spécifiques à la France "
             "(Annexe 7, octobre 2025). Elles couvrent les particularités fiscales françaises : "
-            "SIRET obligatoire, régimes de TVA FR, mentions légales, avoirs et rectificatives. "
+            "SIREN (BT-30/BT-47) obligatoire, régimes de TVA FR, mentions légales, avoirs et rectificatives. "
             "Le moteur est **syntaxe-agnostique** : les valeurs BT sont extraites du XML "
             f"{'via le mapper UBL → BT' if syntax_detect == 'UBL' else 'via XPath CII'} "
             "puis évaluées sur le modèle sémantique EN16931."
@@ -962,7 +1080,7 @@ with tab2:
                 "Testees ici",
                 nb_tested,
                 help=("Regles evaluees sur cette facture : presence des BT, "
-                      "format (SIRET, TVA, dates), codelists (TypeCode, CategoryCode, CountryID).")
+                      "format (SIREN BT-30/BT-47, TVA, dates), codelists (TypeCode, CategoryCode, CountryID).")
             )
             col_a5.metric(
                 "Erreurs",
@@ -1550,6 +1668,7 @@ with tab_legacy:
             extracted = None
 
         if extracted:
+            _legacy_reset_overrides_if_new_xml(_legacy_xml_fingerprint(legacy_xml_content))
             # Rapport d'extraction
             nb_matched = sum(1 for v in [
                 extracted.invoice_number, extracted.issue_date,
@@ -1567,12 +1686,76 @@ with tab_legacy:
                 with st.expander("🔍 Correspondances détectées", expanded=False):
                     for field_key, xpath in extracted.matched_fields.items():
                         st.markdown(f"- `{field_key}` ← `{xpath}`")
+
+            uf = extracted.unmatched_fields
+            if uf:
+                st.markdown("#### 🧩 Cartographie manuelle — balises non reconnues")
+                st.caption(
+                    "Chaque **tuile source** correspond à une balise du XML. "
+                    "Pour chaque **champ cible BT**, choisissez la balise dont la valeur doit être reprise "
+                    "(comme un déplacement vers la cible), puis appliquez — les champs du formulaire sont mis à jour."
+                )
+                raw_parts = []
+                for tag in sorted(uf.keys()):
+                    val = uf[tag]
+                    preview = html.escape(val[:72] + ("…" if len(val) > 72 else ""))
+                    raw_parts.append(
+                        '<div class="legacy-tile-source"><span class="legacy-tile-tag">'
+                        + html.escape(tag)
+                        + '</span><span class="legacy-tile-val">'
+                        + preview
+                        + "</span></div>"
+                    )
+                st.markdown(
+                    '<div class="legacy-tile-grid">' + "".join(raw_parts) + "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                bt_entries = get_active_bt_list()
+
+                def _label_unmapped_option(x: str) -> str:
+                    if x == "—":
+                        return "—"
+                    v = uf[x]
+                    return f"{x} — {v[:40]}…" if len(v) > 40 else f"{x} — {v}"
+
+                with st.form("legacy_tile_mapping_form"):
+                    st.markdown("**⬇️ Champs cibles — associer une balise source**")
+                    for title, chunk in _group_legacy_bt_entries(bt_entries):
+                        st.markdown(f"**{title}**")
+                        for i in range(0, len(chunk), 3):
+                            row = chunk[i : i + 3]
+                            cols = st.columns(3)
+                            for j, bt_ent in enumerate(row):
+                                bt = bt_ent["bt"]
+                                lbl = bt_ent["label"]
+                                opts = ["—"] + sorted(uf.keys())
+                                with cols[j]:
+                                    st.markdown(
+                                        f'<div class="legacy-tile-target-h">{html.escape(bt)} · {html.escape(lbl)}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                    st.selectbox(
+                                        f"source_{bt}",
+                                        opts,
+                                        format_func=_label_unmapped_option,
+                                        key=f"legacy_map_tgt_{bt}",
+                                        label_visibility="collapsed",
+                                    )
+                    submitted_map = st.form_submit_button(
+                        "Appliquer vers les champs BT",
+                        use_container_width=True,
+                    )
+                if submitted_map:
+                    _apply_legacy_tile_mapping(uf, bt_entries)
+                    st.success("Associations appliquées — le formulaire ci-dessous reprend ces valeurs.")
+
             if extracted.unmatched_tags:
-                with st.expander(f"⚠️ {len(extracted.unmatched_tags)} tags non reconnus", expanded=False):
-                    st.caption("Ces balises n'ont pas pu être mappées automatiquement.")
+                with st.expander(f"⚠️ {len(extracted.unmatched_tags)} tags non reconnus (liste)", expanded=False):
+                    st.caption("Balises non mappées automatiquement — utilisez la cartographie ci-dessus si disponible.")
                     st.write(", ".join(f"`{t}`" for t in sorted(extracted.unmatched_tags)))
-            else:
-                st.success("✅ Tous les tags détectés ont été mappés vers le payload canonique.")
+            elif not uf:
+                st.success("✅ Tous les tags détectés ont été mappés automatiquement.")
             st.session_state["legacy_unmapped_count"] = len(extracted.unmatched_tags)
 
             normalized_payload = extracted.normalized_payload
@@ -1596,32 +1779,97 @@ with tab_legacy:
             with st.form("legacy_conversion_form"):
                 st.markdown("**Entête de facture**")
                 fc1, fc2, fc3 = st.columns(3)
-                conv_number   = fc1.text_input("Numéro de facture *", value=extracted.invoice_number)
-                conv_date_str = fc2.text_input("Date d'émission * (YYYY-MM-DD)", value=extracted.issue_date)
-                conv_due_str  = fc3.text_input("Date d'échéance * (YYYY-MM-DD)", value=extracted.due_date)
+                conv_number   = fc1.text_input(
+                    "Numéro de facture *",
+                    value=_legacy_form_value("BT-1", extracted, extracted.invoice_number),
+                )
+                conv_date_str = fc2.text_input(
+                    "Date d'émission * (YYYY-MM-DD)",
+                    value=_legacy_form_value("BT-2", extracted, extracted.issue_date),
+                )
+                conv_due_str  = fc3.text_input(
+                    "Date d'échéance * (YYYY-MM-DD)",
+                    value=_legacy_form_value("BT-9", extracted, extracted.due_date),
+                )
 
                 st.markdown("**Vendeur (émetteur)**")
                 fv1, fv2, fv3 = st.columns(3)
-                conv_seller_name   = fv1.text_input("Raison sociale *", value=extracted.seller_name, key="cs_name")
-                conv_seller_siret  = fv2.text_input("SIRET (14 chiffres) *", value=extracted.seller_siret, key="cs_siret")
-                conv_seller_vat    = fv3.text_input("N° TVA intracommunautaire *", value=extracted.seller_vat, key="cs_vat")
+                conv_seller_name   = fv1.text_input(
+                    "Raison sociale *",
+                    value=_legacy_form_value("BT-27", extracted, extracted.seller_name),
+                    key="cs_name",
+                )
+                conv_seller_siret  = fv2.text_input(
+                    "SIREN vendeur — BT-30 (9 chiffres) *",
+                    value=_legacy_form_value("BT-30", extracted, extracted.seller_siret),
+                    key="cs_siret",
+                )
+                conv_seller_vat    = fv3.text_input(
+                    "N° TVA intracommunautaire *",
+                    value=_legacy_form_value("BT-31", extracted, extracted.seller_vat),
+                    key="cs_vat",
+                )
                 fv4, fv5, fv6 = st.columns(3)
-                conv_seller_street = fv4.text_input("Adresse", value=extracted.seller_street, key="cs_street")
-                conv_seller_postal = fv5.text_input("Code postal", value=extracted.seller_postal, key="cs_postal")
-                conv_seller_city   = fv6.text_input("Ville", value=extracted.seller_city, key="cs_city")
+                conv_seller_street = fv4.text_input(
+                    "Adresse",
+                    value=_legacy_form_value("BT-35", extracted, extracted.seller_street),
+                    key="cs_street",
+                )
+                conv_seller_postal = fv5.text_input(
+                    "Code postal",
+                    value=_legacy_form_value("BT-38", extracted, extracted.seller_postal),
+                    key="cs_postal",
+                )
+                conv_seller_city   = fv6.text_input(
+                    "Ville",
+                    value=_legacy_form_value("BT-37", extracted, extracted.seller_city),
+                    key="cs_city",
+                )
                 fi1, fi2 = st.columns(2)
-                conv_seller_iban   = fi1.text_input("IBAN", value=extracted.seller_iban, key="cs_iban")
-                conv_seller_bic    = fi2.text_input("BIC", value=extracted.seller_bic, key="cs_bic")
+                conv_seller_iban   = fi1.text_input(
+                    "IBAN",
+                    value=_legacy_form_value("BT-84", extracted, extracted.seller_iban),
+                    key="cs_iban",
+                )
+                conv_seller_bic    = fi2.text_input(
+                    "BIC",
+                    value=_legacy_form_value("BT-86", extracted, extracted.seller_bic),
+                    key="cs_bic",
+                )
 
                 st.markdown("**Acheteur (destinataire)**")
                 fa1, fa2, fa3 = st.columns(3)
-                conv_buyer_name    = fa1.text_input("Raison sociale *", value=extracted.buyer_name, key="cb_name")
-                conv_buyer_siret   = fa2.text_input("SIRET (14 chiffres) *", value=extracted.buyer_siret, key="cb_siret")
-                conv_buyer_vat     = fa3.text_input("N° TVA intracommunautaire", value=extracted.buyer_vat, key="cb_vat")
+                conv_buyer_name    = fa1.text_input(
+                    "Raison sociale *",
+                    value=_legacy_form_value("BT-44", extracted, extracted.buyer_name),
+                    key="cb_name",
+                )
+                conv_buyer_siret   = fa2.text_input(
+                    "SIREN acheteur — BT-47 (9 chiffres) *",
+                    value=_legacy_form_value("BT-47", extracted, extracted.buyer_siret),
+                    key="cb_siret",
+                )
+                conv_buyer_vat     = fa3.text_input(
+                    "N° TVA intracommunautaire",
+                    value=_legacy_form_value("BT-48", extracted, extracted.buyer_vat),
+                    key="cb_vat",
+                )
                 fa4, fa5, fa6 = st.columns(3)
-                conv_buyer_street  = fa4.text_input("Adresse", value=extracted.buyer_street, key="cb_street")
-                conv_buyer_postal  = fa5.text_input("Code postal", value=extracted.buyer_postal, key="cb_postal")
-                conv_buyer_city    = fa6.text_input("Ville", value=extracted.buyer_city, key="cb_city")
+                conv_buyer_street  = fa4.text_input(
+                    "Adresse",
+                    value=_legacy_form_value("BT-50", extracted, extracted.buyer_street),
+                    key="cb_street",
+                )
+                conv_buyer_postal  = fa5.text_input(
+                    "Code postal",
+                    value=_legacy_form_value("BT-54", extracted, extracted.buyer_postal),
+                    key="cb_postal",
+                )
+                conv_buyer_city    = fa6.text_input(
+                    "Ville",
+                    value=_legacy_form_value("BT-53", extracted, extracted.buyer_city),
+                    key="cb_city",
+                )
 
                 st.markdown("**Lignes de facture**")
                 if not extracted.lines:
@@ -1645,10 +1893,10 @@ with tab_legacy:
                 errors_conv = []
                 if not conv_number:
                     errors_conv.append("Numéro de facture manquant")
-                if not conv_seller_siret or len(re.sub(r"\D", "", conv_seller_siret)) != 14:
-                    errors_conv.append("SIRET vendeur invalide (14 chiffres requis)")
-                if not conv_buyer_siret or len(re.sub(r"\D", "", conv_buyer_siret)) != 14:
-                    errors_conv.append("SIRET acheteur invalide (14 chiffres requis)")
+                if len(_normalize_siren_bt(conv_seller_siret)) != 9:
+                    errors_conv.append("SIREN vendeur (BT-30) invalide — 9 chiffres (ou SIRET 14 ch., SIREN = 9 premiers chiffres)")
+                if len(_normalize_siren_bt(conv_buyer_siret)) != 9:
+                    errors_conv.append("SIREN acheteur (BT-47) invalide — 9 chiffres (ou SIRET 14 ch., SIREN = 9 premiers chiffres)")
 
                 try:
                     conv_issue_date = date.fromisoformat(conv_date_str)
@@ -1677,16 +1925,16 @@ with tab_legacy:
 
                         seller_conv = Party(
                             name=conv_seller_name,
-                            siret=re.sub(r"\D", "", conv_seller_siret),
-                            vat_number=conv_seller_vat or f"FR00{re.sub(r'D','',conv_seller_siret)[:9]}",
+                            siret=_normalize_siren_bt(conv_seller_siret),
+                            vat_number=conv_seller_vat or f"FR00{_normalize_siren_bt(conv_seller_siret)}",
                             address=_make_addr(conv_seller_street, conv_seller_postal, conv_seller_city),
                             iban=conv_seller_iban or None,
                             bic=conv_seller_bic or None,
                         )
                         buyer_conv = Party(
                             name=conv_buyer_name,
-                            siret=re.sub(r"\D", "", conv_buyer_siret),
-                            vat_number=conv_buyer_vat or f"FR00{re.sub(r'D','',conv_buyer_siret)[:9]}",
+                            siret=_normalize_siren_bt(conv_buyer_siret),
+                            vat_number=conv_buyer_vat or f"FR00{_normalize_siren_bt(conv_buyer_siret)}",
                             address=_make_addr(conv_buyer_street, conv_buyer_postal, conv_buyer_city),
                         )
 

@@ -31,7 +31,7 @@ from validate_invoice import InvoiceValidator
 def make_seller():
     return Party(
         name="Acme SAS",
-        siret="12345678901234",
+        siret="123456789",
         vat_number="FR12345678901",
         address=Address("1 rue Test", "Paris", "75001"),
         iban="FR7630006000011234567890189",
@@ -40,7 +40,7 @@ def make_seller():
 def make_buyer():
     return Party(
         name="Client SARL",
-        siret="98765432109876",
+        siret="987654321",
         vat_number="FR98765432109",
         address=Address("2 av Test", "Lyon", "69001"),
     )
@@ -146,10 +146,10 @@ class TestXMLGeneration(unittest.TestCase):
         xml = generate_facturx_xml(invoice)
         self.assertIn("Client SARL", xml)
 
-    def test_contains_siret(self):
+    def test_contains_siren_bt30(self):
         invoice = make_invoice()
         xml = generate_facturx_xml(invoice)
-        self.assertIn("12345678901234", xml)
+        self.assertIn("123456789", xml)
 
     def test_contains_vat_number(self):
         invoice = make_invoice()
@@ -206,14 +206,14 @@ class TestValidation(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any(i.rule_id == "PARSE-ERR" for i in result.errors))
 
-    def test_invalid_siret_creates_error(self):
+    def test_invalid_siren_creates_error(self):
         seller = make_seller()
         seller.siret = "INVALID"
         invoice = make_invoice(seller=seller)
         xml = generate_facturx_xml(invoice)
         result = self._validate(xml)
-        siret_errors = [i for i in result.issues if i.rule_id == "FR-01"]
-        self.assertTrue(len(siret_errors) > 0)
+        siren_errors = [i for i in result.issues if i.rule_id == "FR-01"]
+        self.assertTrue(len(siren_errors) > 0)
 
     def test_file_not_found(self):
         validator = InvoiceValidator("/tmp/nonexistent_file_xyz.xml")

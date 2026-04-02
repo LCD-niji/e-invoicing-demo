@@ -105,7 +105,7 @@
     },
     {
       "bt": "BT-30",
-      "label": "SIRET vendeur",
+      "label": "SIREN vendeur (BT-30)",
       "legacy_path": "Seller/SIRET",
       "cii_xpath": "ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID",
       "required": true,
@@ -171,7 +171,7 @@
     },
     {
       "bt": "BT-47",
-      "label": "SIRET acheteur",
+      "label": "SIREN acheteur (BT-47)",
       "legacy_path": "Buyer/SIRET",
       "cii_xpath": "ram:BuyerTradeParty/ram:SpecifiedLegalOrganization/ram:ID",
       "required": false,
@@ -278,7 +278,7 @@
   "transforms": {
     "date_dmy_to_ymd": "Convertit JJ/MM/AAAA en AAAAMMJJ",
     "vat_rate_to_category": "Convertit un taux (20.0) en code catégorie (S)",
-    "normalize_siret": "Supprime espaces et tirets, garde 14 chiffres"
+    "normalize_siret": "Supprime espaces et tirets ; BT-30/BT-47 = SIREN 9 chiffres (si 14 chiffres → 9 premiers)"
   },
 
   "missing_fields_strategy": "use_default_or_skip"

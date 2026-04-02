@@ -248,17 +248,17 @@ class InvoiceValidator:
         else:
             self._info("BR-06", f"Vendeur : {seller_name}")
 
-        # SIRET (schemeID=0002)
+        # SIREN BT-30 (schemeID=0002) — Annexe 7 DGFiP
         seller_org = _find(agr, "ram:SellerTradeParty/ram:SpecifiedLegalOrganization")
         if seller_org is not None:
             siret_el = seller_org.find(f"{{{NS['ram']}}}ID")
             if siret_el is not None:
-                siret = siret_el.text or ""
-                if not re.match(r"^\d{14}$", siret):
-                    self._error("FR-01", f"SIRET vendeur invalide : '{siret}' (14 chiffres attendus)",
-                                suggestion="Le SIRET est composé du SIREN (9 chiffres) + NIC (5 chiffres)")
+                siren = siret_el.text or ""
+                if not re.match(r"^\d{9}$", siren):
+                    self._error("FR-01", f"SIREN vendeur (BT-30) invalide : '{siren}' (9 chiffres attendus)",
+                                suggestion="Le champ d'identification légale vendeur est le SIREN à 9 chiffres (Annexe 7).")
                 else:
-                    self._info("FR-01", f"SIRET vendeur : {siret}")
+                    self._info("FR-01", f"SIREN vendeur (BT-30) : {siren}")
 
         # N° TVA
         vat = _text(agr, "ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID")
@@ -393,21 +393,21 @@ class InvoiceValidator:
         buyer_org = _find(agr, "ram:BuyerTradeParty/ram:SpecifiedLegalOrganization")
 
         if buyer_org is None:
-            self._warn("FR-02", "SIRET acheteur absent",
+            self._warn("FR-02", "SIREN acheteur (BT-47) absent",
                     suggestion="Obligatoire B2G (Chorus Pro), recommandé B2B dès 2026")
             return
 
-        siret_el = buyer_org.find(f"{{{NS['ram']}}}ID")
-        siret    = (siret_el.text or "").strip() if siret_el is not None else ""
+        siren_el = buyer_org.find(f"{{{NS['ram']}}}ID")
+        siren    = (siren_el.text or "").strip() if siren_el is not None else ""
 
-        if not siret:
-            self._warn("FR-02", "SIRET acheteur vide",
-                    suggestion="Tag présent sans valeur — renseignez un SIRET valide (14 chiffres)")
-        elif not re.match(r"^\d{14}$", siret):
-            self._warn("FR-02", f"SIRET acheteur suspect : '{siret}'",
-                    suggestion="14 chiffres exactement (SIREN 9 + NIC 5)")
+        if not siren:
+            self._warn("FR-02", "SIREN acheteur (BT-47) vide",
+                    suggestion="Renseignez le SIREN à 9 chiffres (Annexe 7 DGFiP).")
+        elif not re.match(r"^\d{9}$", siren):
+            self._warn("FR-02", f"SIREN acheteur (BT-47) suspect : '{siren}'",
+                    suggestion="9 chiffres exactement (SIREN).")
         else:
-            self._info("FR-02", f"SIRET acheteur : {siret}")
+            self._info("FR-02", f"SIREN acheteur (BT-47) : {siren}")
     
     def _check_credit_note_reference(self):
         """BR-55 : un avoir/rectificative doit référencer la facture d'origine."""

@@ -29,6 +29,8 @@ class ExtractionResult:
     # Les tests + l'UI attendent une collection de tags non mappés,
     # sans forcément conserver (tag XML original, valeur).
     unmatched_tags: set[str] = field(default_factory=set)
+    # Balise normalisée → texte (première occurrence) pour cartographie manuelle (tuiles).
+    unmatched_fields: dict[str, str] = field(default_factory=dict)
     total_tags:   int = 0
     matched_tags: int = 0
 
@@ -137,7 +139,7 @@ class ExtractionResult:
 
     @property
     def buyer_postal(self) -> str:
-        return self.mapped.get("BT-53", "")
+        return self.mapped.get("BT-54", "") or self.mapped.get("BT-53", "")
 
     @property
     def buyer_country(self) -> str:
@@ -192,6 +194,7 @@ class ExtractionResult:
             ],
             # Sécuriser la sérialisation JSON (sets ne sont pas sérialisables nativement).
             "unmatched_tags": sorted(self.unmatched_tags),
+            "unmatched_fields": dict(sorted(self.unmatched_fields.items())),
             "stats": {
                 "total_tags": self.total_tags,
                 "matched_tags": self.matched_tags,
@@ -236,11 +239,12 @@ def _load_active_bts() -> set[str]:
     return active
 
 
-def build_field_map() -> dict[str, dict]:
+def build_field_map(legacy_relaxed: bool = False) -> dict[str, dict]:
     """
     Génère le mapping normalisé_pattern → {bt, label}
     à partir des synonymes ET des règles actives.
-    Seuls les BT présents dans rules.json (f1:true) sont inclus.
+    Par défaut, seuls les BT présents dans rules.json (f1:true) sont inclus.
+    Pour l'import legacy, utiliser legacy_relaxed=True pour garder tous les BT des synonymes.
     """
     if not SYNONYMS_PATH.exists():
         return _fallback_field_map()
@@ -254,7 +258,7 @@ def build_field_map() -> dict[str, dict]:
     for bt_code, meta in synonyms.items():
         if bt_code.startswith("_"):
             continue
-        if active_bts and bt_code not in active_bts:
+        if not legacy_relaxed and active_bts and bt_code not in active_bts:
             continue
         label = meta.get("label", bt_code)
         for pattern in meta.get("patterns", []):
@@ -291,10 +295,10 @@ _BT_LABELS = {
     "BT-9": "Date d'échéance",   "BT-10": "Référence acheteur",
     "BT-12": "Référence contrat","BT-13": "Bon de commande",
     "BT-22": "Note",             "BT-27": "Nom vendeur",
-    "BT-30": "SIRET vendeur",    "BT-31": "TVA vendeur",
+    "BT-30": "SIREN vendeur (BT-30)",    "BT-31": "TVA vendeur",
     "BT-35": "Rue vendeur",      "BT-37": "Ville vendeur",
     "BT-38": "CP vendeur",       "BT-40": "Pays vendeur",
-    "BT-44": "Nom acheteur",     "BT-47": "SIRET acheteur",
+    "BT-44": "Nom acheteur",     "BT-47": "SIREN acheteur (BT-47)",
     "BT-53": "Ville acheteur",   "BT-55": "Pays acheteur",
     "BT-84": "IBAN",             "BT-126": "N° ligne",
     "BT-129": "Quantité",        "BT-146": "Prix unitaire",
@@ -340,8 +344,8 @@ def _fallback_field_map() -> dict[str, dict]:
         # Vendeur
         "nomfournisseur":{"bt": "BT-27", "label": "Nom vendeur"},
         "sellername":    {"bt": "BT-27", "label": "Nom vendeur"},
-        "siretfournisseur":{"bt":"BT-30","label": "SIRET vendeur"},
-        "siretvendeur":  {"bt": "BT-30", "label": "SIRET vendeur"},
+        "siretfournisseur":{"bt":"BT-30","label": "SIREN vendeur (BT-30)"},
+        "siretvendeur":  {"bt": "BT-30", "label": "SIREN vendeur (BT-30)"},
         "tvafournisseur":{"bt": "BT-31", "label": "TVA vendeur"},
         "numtvafournisseur":{"bt":"BT-31","label":"TVA vendeur"},
         "adrfournisseur":{"bt": "BT-35", "label": "Rue vendeur"},
@@ -356,8 +360,8 @@ def _fallback_field_map() -> dict[str, dict]:
         "nomclient":     {"bt": "BT-44", "label": "Nom acheteur"},
         "raisonsocialeclient":{"bt":"BT-44","label":"Nom acheteur"},
         "buyername":     {"bt": "BT-44", "label": "Nom acheteur"},
-        "siretclient":   {"bt": "BT-47", "label": "SIRET acheteur"},
-        "siretacheteur": {"bt": "BT-47", "label": "SIRET acheteur"},
+        "siretclient":   {"bt": "BT-47", "label": "SIREN acheteur (BT-47)"},
+        "siretacheteur": {"bt": "BT-47", "label": "SIREN acheteur (BT-47)"},
         "villeclient":   {"bt": "BT-53", "label": "Ville acheteur"},
         "paysclient":    {"bt": "BT-55", "label": "Pays acheteur"},
         # Lignes
@@ -469,7 +473,7 @@ def extract_from_xml(xml_content: str) -> ExtractionResult:
     Utilise le mapping dérivé de rules.json + bt_synonyms.json.
     """
     result     = ExtractionResult()
-    field_map  = build_field_map()
+    field_map  = build_field_map(legacy_relaxed=True)
 
     # Parser le XML (tolérant aux encodages)
     try:
@@ -514,6 +518,8 @@ def extract_from_xml(xml_content: str) -> ExtractionResult:
                 result.matched_tags += 1
         else:
             result.unmatched_tags.add(tag_norm)
+            if tag_norm not in result.unmatched_fields:
+                result.unmatched_fields[tag_norm] = value
 
     # ── Post-traitement dates ──────────────────────────────
     for bt in ("BT-2", "BT-9"):
@@ -574,6 +580,7 @@ def make_sample_legacy_xml() -> str:
     <Devise>EUR</Devise>
     <AdrCptCli>C100042</AdrCptCli>
     <Comment>Prestation de conseil en transformation numérique — Mars 2026</Comment>
+    <RefInterneLegacy>REF-DEMO-888</RefInterneLegacy>
   </Entete>
   <Fournisseur>
     <NomFournisseur>Acme Conseil SAS</NomFournisseur>

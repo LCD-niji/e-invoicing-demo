@@ -42,7 +42,7 @@ class Address:
 @dataclass
 class Party:
     name: str
-    siret: str          # 14 chiffres
+    siret: str          # SIREN 9 chiffres (BT-30 / BT-47, Annexe 7 DGFiP)
     vat_number: str     # FR + 11 chiffres
     address: Address
     iban: Optional[str] = None
@@ -417,7 +417,7 @@ def make_demo_invoice() -> Invoice:
     """Retourne une facture exemple prête à l'emploi."""
     seller = Party(
         name="Acme Conseil SAS",
-        siret="12345678901234",
+        siret="123456789",
         vat_number="FR12345678901",
         address=Address("12 rue de la Paix", "Paris", "75001"),
         iban="FR7630006000011234567890189",
@@ -425,7 +425,7 @@ def make_demo_invoice() -> Invoice:
     )
     buyer = Party(
         name="Dupont & Fils SARL",
-        siret="98765432109876",
+        siret="987654321",
         vat_number="FR98765432109",
         address=Address("5 avenue des Champs", "Lyon", "69001"),
     )

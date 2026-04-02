@@ -201,22 +201,22 @@ def analyze_plain_pdf(pdf_bytes: bytes) -> PdfAnalysisResult:
         )
     )
 
-    # ── SIRET vendeur ───────────────────────────────────────────────────────
+    # ── SIREN vendeur (BT-30) — détection heuristique via SIRET 14 ch. en PDF ──
     sirets = _SIRET.findall(text)
     if sirets:
         detected["siret_candidats"] = list(dict.fromkeys(sirets))[:4]
+        detected["siren_vendeur_candidats"] = [s[:9] for s in detected["siret_candidats"]]
     else:
         issues.append(
             PdfIssue(
                 category="bloquant",
                 code="FR-01",
-                label="SIRET vendeur non détecté (14 chiffres requis)",
+                label="SIREN vendeur (BT-30) non détecté — attendu 9 chiffres (Annexe 7)",
                 explanation=(
-                    "Le SIRET (BT-30) identifie légalement le vendeur auprès de la DGFiP. "
-                    "Sans lui, la facture ne peut pas être routée ni rapprochée comptablement. "
-                    "Amende : 15 € par facture non conforme."
+                    "BT-30 porte le SIREN (9 chiffres), pas le SIRET complet. "
+                    "Les mentions légales affichent souvent le SIRET (14 chiffres) : les 9 premiers chiffres forment le SIREN."
                 ),
-                fix="Ajouter le SIRET à 14 chiffres dans les mentions légales du vendeur.",
+                fix="Renseigner le SIREN vendeur (9 chiffres) ou un SIRET (14 chiffres) dont on déduit le SIREN.",
             )
         )
 

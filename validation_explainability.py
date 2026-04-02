@@ -36,7 +36,10 @@ def explain_issue_plain_language(rule_id: str, message: str, severity: str) -> s
         return "Un code utilisé n'est pas reconnu par la norme. Vérifiez devise, pays ou code de catégorie."
     if rid in {"BR-01", "BR-02", "BR-03", "BR-04", "BR-05", "BR-06", "BR-07"}:
         return "Une information obligatoire manque dans la facture. Complétez les champs requis puis revalidez."
-    if "SIRET" in (message or "").upper():
+    msg_u = (message or "").upper()
+    if "SIREN" in msg_u or ("BT-30" in msg_u or "BT-47" in msg_u):
+        return "Le SIREN semble invalide ou absent. Renseignez un SIREN à 9 chiffres (Annexe 7)."
+    if "SIRET" in msg_u:
         return "Le SIRET semble invalide ou absent. Renseignez un SIRET à 14 chiffres."
     if severity == "blocking":
         return "Cette anomalie bloque la conformité de la facture et doit être corrigée."
@@ -59,6 +62,9 @@ def remediation_guidance(rule_id: str, message: str) -> str:
         return "Utilisez une valeur de code conforme (ISO 4217, ISO 3166-1 alpha-2, UNCL selon le champ)."
     if rid in {"BR-01", "BR-02", "BR-03", "BR-04", "BR-05", "BR-06", "BR-07"}:
         return "Renseignez le champ obligatoire manquant dans l'onglet de génération puis relancez la validation."
-    if "SIRET" in (message or "").upper():
+    msg_u = (message or "").upper()
+    if "SIREN" in msg_u or ("BT-30" in msg_u or "BT-47" in msg_u):
+        return "Corrigez le SIREN en 9 chiffres sans espaces ni caractères spéciaux."
+    if "SIRET" in msg_u:
         return "Corrigez le SIRET en 14 chiffres sans espaces ni caractères spéciaux."
     return "Corrigez la donnée signalée par la règle, puis relancez la validation pour confirmer."

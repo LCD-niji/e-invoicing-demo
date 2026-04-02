@@ -294,15 +294,15 @@
     "impact": "rejet_automatique"
   },
   "FR-01": {
-    "label": "SIRET vendeur absent ou invalide (14 chiffres requis)",
-    "explanation": "Le SIRET du vendeur (14 chiffres) est obligatoire pour toutes les factures B2B françaises selon l'Annexe 7 DGFiP. Il permet l'identification légale du vendeur dans l'annuaire centralisé et conditionne le routage par la Plateforme Agréée.",
-    "fix": "Renseigner le SIRET à 14 chiffres du vendeur. Le SIRET = SIREN (9 chiffres) + NIC (5 chiffres). Vérifiable sur societe.com ou INSEE.",
+    "label": "SIREN vendeur (BT-30) absent ou invalide (9 chiffres requis)",
+    "explanation": "Le SIREN du vendeur dans BT-30 (identifiant légal, 9 chiffres) est exigé par l'Annexe 7 DGFiP pour l'identification dans l'annuaire et le routage par la Plateforme Agréée. Ce n'est pas le SIRET (14 chiffres).",
+    "fix": "Renseigner le SIREN à 9 chiffres du vendeur (INSEE / societe.com). Le NIC (établissement) ne s'encode pas dans BT-30.",
     "impact": "rejet_automatique"
   },
   "FR-02": {
-    "label": "SIRET acheteur absent ou invalide",
-    "explanation": "Le SIRET de l'acheteur est requis par la DGFiP pour le routage automatique de la facture vers la bonne entité via l'annuaire centralisé. Sans lui, la plateforme agréée ne peut pas délivrer la facture.",
-    "fix": "Renseigner le SIRET à 14 chiffres de l'acheteur. Pour un client qui refuse de le communiquer, utiliser le SIREN à 9 chiffres en fallback.",
+    "label": "SIREN acheteur (BT-47) absent ou invalide",
+    "explanation": "Le SIREN de l'acheteur dans BT-47 (9 chiffres) est requis pour le routage vers la bonne entité via l'annuaire. Format Annexe 7, pas le SIRET.",
+    "fix": "Renseigner le SIREN à 9 chiffres de l'acheteur dans l'identifiant légal (BT-47).",
     "impact": "rejet_automatique"
   },
   "FR-03": {

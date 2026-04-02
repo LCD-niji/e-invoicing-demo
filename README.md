@@ -105,8 +105,8 @@ BR-26   Quantité facturée
 BR-27   Prix unitaire net
 BR-CO-15 Cohérence arithmétique HT + TVA = TTC
 BR-CO-16 DuePayableAmount = GrandTotalAmount
-FR-01   SIRET vendeur (14 chiffres)
-FR-02   SIRET acheteur
+FR-01   SIREN vendeur BT-30 (9 chiffres)
+FR-02   SIREN acheteur BT-47 (9 chiffres)
 FR-TVA  Format numéro TVA intracommunautaire
 ```
 

@@ -24,7 +24,7 @@ class TestInvoicePayload(unittest.TestCase):
         self.assertIsNotNone(invoice)
         self.assertEqual(invoice.number, "FAC-2026-001")
         self.assertEqual(invoice.seller.name, "Acme Conseil SAS")
-        self.assertEqual(invoice.buyer.siret, "98765432109876")
+        self.assertEqual(invoice.buyer.siret, "987654321")
         self.assertEqual(len(invoice.lines), 1)
 
     def test_build_invoice_from_form_missing_required_fields(self):

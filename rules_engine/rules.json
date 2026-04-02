@@ -191,7 +191,7 @@
       "titre": "SIREN Acheteur et Vendeur",
       "bt": "BT-30,BT-47",
       "f1": true,
-      "desc": "BT-30 et BT-47 obligatoires, doivent exister dans l'annuaire. Identifiant de schéma associé obligatoire."
+      "desc": "BT-30 et BT-47 (SIREN, 9 chiffres) obligatoires, doivent exister dans l'annuaire. Identifiant de schéma associé obligatoire."
     },
     {
       "id": "G1.76",

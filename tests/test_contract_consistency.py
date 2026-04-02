@@ -24,13 +24,13 @@ def _build_invoice():
         due_date=date(2026, 5, 1),
         seller=Party(
             name="Seller",
-            siret="12345678901234",
+            siret="123456789",
             vat_number="FR12345678901",
             address=Address("1 rue test", "Paris", "75001"),
         ),
         buyer=Party(
             name="Buyer",
-            siret="98765432109876",
+            siret="987654321",
             vat_number="FR98765432109",
             address=Address("2 rue test", "Lyon", "69001"),
         ),

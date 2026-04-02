@@ -7,7 +7,7 @@ def get_preloaded_examples() -> dict:
     return {
         "PME Services FR": {
             "seller_name": "Acme Conseil SAS",
-            "seller_siret": "12345678901234",
+            "seller_siret": "123456789",
             "seller_vat": "FR12345678901",
             "seller_iban": "FR7630006000011234567890189",
             "seller_bic": "BNPAFRPP",
@@ -16,7 +16,7 @@ def get_preloaded_examples() -> dict:
             "seller_zip": "75001",
             "seller_country": "FR",
             "buyer_name": "Dupont Industries SARL",
-            "buyer_siret": "98765432109876",
+            "buyer_siret": "987654321",
             "buyer_vat": "FR98765432109",
             "buyer_street": "5 avenue de la Gare",
             "buyer_zip": "69001",
@@ -38,7 +38,7 @@ def get_demo_scenarios() -> dict:
     """
     base = {
         "seller_name": "Acme Conseil SAS",
-        "seller_siret": "12345678901234",
+        "seller_siret": "123456789",
         "seller_vat": "FR12345678901",
         "seller_iban": "FR7630006000011234567890189",
         "seller_bic": "BNPAFRPP",
@@ -47,7 +47,7 @@ def get_demo_scenarios() -> dict:
         "seller_zip": "75001",
         "seller_country": "FR",
         "buyer_name": "Dupont Industries SARL",
-        "buyer_siret": "98765432109876",
+        "buyer_siret": "987654321",
         "buyer_vat": "FR98765432109",
         "buyer_street": "5 avenue de la Gare",
         "buyer_zip": "69001",
@@ -68,11 +68,11 @@ def get_demo_scenarios() -> dict:
             "_demo_lines": [("Prestation conseil SI", 1.0, 1500.0, 20.0)],
         },
 
-        "❌ SIRET vendeur manquant — [FR-01]": {
+        "❌ SIREN vendeur manquant — [FR-01]": {
             **base,
             "seller_siret": "",  # ← volontairement vide
             "_demo_tag": "error",
-            "_demo_description": "Le SIRET vendeur est absent. "
+            "_demo_description": "Le SIREN vendeur (BT-30) est absent. "
             "Erreur attendue : FR-01 bloquant. "
             "Amende théorique : 15 € par facture.",
             "_demo_lines": [("Maintenance logicielle", 3.0, 400.0, 20.0)],
@@ -113,12 +113,12 @@ def get_demo_scenarios() -> dict:
             # Note : à combiner avec TypeCode=381 dans l'UI
         },
 
-        "❌ SIRET acheteur manquant — [FR-02]": {
+        "❌ SIREN acheteur manquant — [FR-02]": {
             **base,
             "buyer_siret": "",  # ← volontairement vide
             "invoice_number": "FAC-2026-003",
             "_demo_tag": "error",
-            "_demo_description": "Le SIRET de l'acheteur est absent. "
+            "_demo_description": "Le SIREN acheteur (BT-47) est absent. "
             "Obligatoire pour le routage via la PA. "
             "Erreur attendue : FR-02 warning.",
             "_demo_lines": [("Audit sécurité", 5.0, 250.0, 20.0)],
@@ -129,9 +129,9 @@ def get_demo_scenarios() -> dict:
 def build_invoice_from_form(form_data: dict, lines_data: list, issue_date, due_date, profile: str):
     required_fields = {
         "seller_name": "Raison sociale vendeur",
-        "seller_siret": "SIRET vendeur",
+        "seller_siret": "SIREN vendeur (9 chiffres)",
         "buyer_name": "Raison sociale acheteur",
-        "buyer_siret": "SIRET acheteur",
+        "buyer_siret": "SIREN acheteur (9 chiffres)",
         "invoice_number": "Numero de facture",
     }
 
