@@ -56,6 +56,8 @@ def _legacy_reset_overrides_if_new_xml(fp: str) -> None:
     if st.session_state.get("legacy_xml_fingerprint") != fp:
         st.session_state.legacy_xml_fingerprint = fp
         st.session_state.legacy_bt_overrides = {}
+        st.session_state.legacy_tile_dismissed = []
+        st.session_state.legacy_tile_used = []
 
 
 def _legacy_form_value(bt: str, extracted: ExtractionResult, property_fallback: str = "") -> str:
@@ -92,9 +94,26 @@ def _group_legacy_bt_entries(bt_entries: list[dict]) -> list[tuple[str, list[dic
     return out
 
 
+def _legacy_visible_tag_pool(uf: dict[str, str]) -> list[str]:
+    """Balises encore affichées dans la zone principale (pas masquées ni déjà affectées à un BT)."""
+    dismissed = set(st.session_state.get("legacy_tile_dismissed") or [])
+    used = set(st.session_state.get("legacy_tile_used") or [])
+    return sorted(t for t in uf if t not in dismissed and t not in used)
+
+
+def _legacy_sanitize_map_selects(visible: list[str]) -> None:
+    """Évite une valeur de selectbox hors options quand une tuile disparaît."""
+    allowed = {"—", *visible}
+    for k in list(st.session_state.keys()):
+        if isinstance(k, str) and k.startswith("legacy_map_tgt_"):
+            if st.session_state.get(k) not in allowed:
+                st.session_state[k] = "—"
+
+
 def _apply_legacy_tile_mapping(unmatched_fields: dict[str, str], bt_entries: list[dict]) -> None:
-    """Lit les selectbox de cibles et met à jour legacy_bt_overrides."""
+    """Lit les selectbox de cibles et met à jour legacy_bt_overrides + balises « utilisées »."""
     base = dict(st.session_state.get("legacy_bt_overrides", {}))
+    newly_used: list[str] = []
     for bt_ent in bt_entries:
         bt = bt_ent["bt"]
         sel = st.session_state.get(f"legacy_map_tgt_{bt}", "—")
@@ -109,7 +128,10 @@ def _apply_legacy_tile_mapping(unmatched_fields: dict[str, str], bt_entries: lis
         if bt in ("BT-30", "BT-47"):
             raw = _normalize_siren_bt(raw)
         base[bt] = raw
+        newly_used.append(sel)
     st.session_state.legacy_bt_overrides = base
+    prev = list(st.session_state.get("legacy_tile_used") or [])
+    st.session_state.legacy_tile_used = sorted(set(prev) | set(newly_used))
 
 
 # ── Page config ───────────────────────────────────────────
@@ -1697,38 +1719,107 @@ with tab_legacy:
 
             uf = _legacy_unmatched_fields(extracted)
             if uf:
+                visible = _legacy_visible_tag_pool(uf)
+                _legacy_sanitize_map_selects(visible)
+
                 st.markdown("#### 🧩 Cartographie manuelle — balises non reconnues")
                 st.caption(
-                    "Chaque **tuile source** correspond à une balise du XML. "
-                    "Pour chaque **champ cible BT**, choisissez la balise dont la valeur doit être reprise "
-                    "(comme un déplacement vers la cible), puis appliquez — les champs du formulaire sont mis à jour."
+                    "**Tuiles** : chaque carte est une balise du XML. Utilisez **Masquer** pour la retirer "
+                    "de la zone (ignore, ou traité ailleurs) — la liste se clarifie. "
+                    "Associez une balise à un **champ BT** ci-dessous puis **Appliquer** : la balise utilisée "
+                    "sort aussi de la zone. Les retraits sont réversibles dans **Balises retirées**."
                 )
-                raw_parts = []
-                for tag in sorted(uf.keys()):
-                    val = uf[tag]
-                    preview = html.escape(val[:72] + ("…" if len(val) > 72 else ""))
-                    raw_parts.append(
-                        '<div class="legacy-tile-source"><span class="legacy-tile-tag">'
-                        + html.escape(tag)
-                        + '</span><span class="legacy-tile-val">'
-                        + preview
-                        + "</span></div>"
+                _fp_short = (st.session_state.get("legacy_xml_fingerprint") or "x")[:10]
+                st.caption(
+                    f"**{len(visible)}** tuile(s) dans la zone principale · **{len(uf)}** balise(s) au total"
+                )
+
+                if visible:
+                    st.markdown("**📥 Zone « À traiter »**")
+                    for row_start in range(0, len(visible), 3):
+                        row_tags = visible[row_start : row_start + 3]
+                        cols = st.columns(3)
+                        for ci, tag in enumerate(row_tags):
+                            val = uf[tag]
+                            preview = val[:90] + ("…" if len(val) > 90 else "")
+                            with cols[ci]:
+                                with st.container(border=True):
+                                    st.markdown(f"**`{tag}`**")
+                                    st.caption(preview)
+                                    _hid = hashlib.md5(tag.encode("utf-8")).hexdigest()[:12]
+
+                                    def _hide_tag(t=tag):
+                                        lst = list(st.session_state.get("legacy_tile_dismissed") or [])
+                                        if t not in lst:
+                                            lst.append(t)
+                                        st.session_state.legacy_tile_dismissed = lst
+
+                                    st.button(
+                                        "✕ Masquer de la zone",
+                                        key=f"lg_hide_{_fp_short}_{_hid}",
+                                        help="Retire la tuile pour y voir plus clair (réversible ci-dessous).",
+                                        on_click=_hide_tag,
+                                        use_container_width=True,
+                                    )
+                else:
+                    st.info(
+                        "Aucune tuile dans la zone principale : tout est masqué ou déjà affecté à un champ BT. "
+                        "Réaffichez des balises depuis la section ci-dessous si besoin."
                     )
-                st.markdown(
-                    '<div class="legacy-tile-grid">' + "".join(raw_parts) + "</div>",
-                    unsafe_allow_html=True,
+
+                pool_off = set(st.session_state.get("legacy_tile_dismissed") or []) | set(
+                    st.session_state.get("legacy_tile_used") or []
                 )
+                if pool_off:
+                    with st.expander(
+                        f"📦 Balises retirées de la zone ({len(pool_off)}) — réafficher",
+                        expanded=False,
+                    ):
+                        st.caption(
+                            "Cochez **Réafficher** pour remettre une balise dans « À traiter » "
+                            "(elle redevient disponible dans les listes cibles)."
+                        )
+                        for tag in sorted(pool_off):
+                            if tag not in uf:
+                                continue
+                            v = uf[tag]
+                            pv = v[:60] + ("…" if len(v) > 60 else "")
+                            c_a, c_b = st.columns([4, 1])
+                            with c_a:
+                                st.markdown(f"`{tag}` · {pv}")
+                            with c_b:
+
+                                def _restore_tag(t=tag):
+                                    st.session_state.legacy_tile_dismissed = [
+                                        x
+                                        for x in (st.session_state.get("legacy_tile_dismissed") or [])
+                                        if x != t
+                                    ]
+                                    st.session_state.legacy_tile_used = [
+                                        x
+                                        for x in (st.session_state.get("legacy_tile_used") or [])
+                                        if x != t
+                                    ]
+
+                                _rid = hashlib.md5(tag.encode("utf-8")).hexdigest()[:12]
+                                st.button(
+                                    "↩ Réafficher",
+                                    key=f"lg_rst_{_fp_short}_{_rid}",
+                                    on_click=_restore_tag,
+                                    use_container_width=True,
+                                )
 
                 bt_entries = get_active_bt_list()
 
                 def _label_unmapped_option(x: str) -> str:
                     if x == "—":
-                        return "—"
+                        return "— (aucune)"
                     v = uf[x]
                     return f"{x} — {v[:40]}…" if len(v) > 40 else f"{x} — {v}"
 
                 with st.form("legacy_tile_mapping_form"):
                     st.markdown("**⬇️ Champs cibles — associer une balise source**")
+                    _opts_pool = ["—"] + visible
                     for title, chunk in _group_legacy_bt_entries(bt_entries):
                         st.markdown(f"**{title}**")
                         for i in range(0, len(chunk), 3):
@@ -1737,7 +1828,6 @@ with tab_legacy:
                             for j, bt_ent in enumerate(row):
                                 bt = bt_ent["bt"]
                                 lbl = bt_ent["label"]
-                                opts = ["—"] + sorted(uf.keys())
                                 with cols[j]:
                                     st.markdown(
                                         f'<div class="legacy-tile-target-h">{html.escape(bt)} · {html.escape(lbl)}</div>',
@@ -1745,7 +1835,7 @@ with tab_legacy:
                                     )
                                     st.selectbox(
                                         f"source_{bt}",
-                                        opts,
+                                        _opts_pool,
                                         format_func=_label_unmapped_option,
                                         key=f"legacy_map_tgt_{bt}",
                                         label_visibility="collapsed",
