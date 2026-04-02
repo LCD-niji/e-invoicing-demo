@@ -194,7 +194,7 @@ class ExtractionResult:
             ],
             # Sécuriser la sérialisation JSON (sets ne sont pas sérialisables nativement).
             "unmatched_tags": sorted(self.unmatched_tags),
-            "unmatched_fields": dict(sorted(self.unmatched_fields.items())),
+            "unmatched_fields": dict(sorted(getattr(self, "unmatched_fields", {}).items())),
             "stats": {
                 "total_tags": self.total_tags,
                 "matched_tags": self.matched_tags,

@@ -69,6 +69,14 @@ def _legacy_form_value(bt: str, extracted: ExtractionResult, property_fallback: 
     return property_fallback
 
 
+def _legacy_unmatched_fields(extracted: ExtractionResult) -> dict[str, str]:
+    """Balises non mappées avec valeur (tuiles). Compat si ancien convert_legacy sans cet attribut."""
+    uf = getattr(extracted, "unmatched_fields", None)
+    if isinstance(uf, dict):
+        return uf
+    return {}
+
+
 def _group_legacy_bt_entries(bt_entries: list[dict]) -> list[tuple[str, list[dict]]]:
     by_code = {x["bt"]: x for x in bt_entries}
     out: list[tuple[str, list[dict]]] = []
@@ -1687,7 +1695,7 @@ with tab_legacy:
                     for field_key, xpath in extracted.matched_fields.items():
                         st.markdown(f"- `{field_key}` ← `{xpath}`")
 
-            uf = extracted.unmatched_fields
+            uf = _legacy_unmatched_fields(extracted)
             if uf:
                 st.markdown("#### 🧩 Cartographie manuelle — balises non reconnues")
                 st.caption(
