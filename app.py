@@ -380,6 +380,15 @@ with tab1:
         unsafe_allow_html=True,
     )
     st.subheader("Génération d'une facture électronique")
+    st.caption(
+        "Objectif : produire une facture structurée conforme (Factur-X, CII ou UBL) "
+        "à partir de vos données métier."
+    )
+    st.info(
+        "Conseil d'utilisation : renseignez d'abord les identifiants légaux (SIRET, TVA), "
+        "puis les lignes de facturation. En cas d'information manquante, l'outil génère quand même "
+        "le document et signale les points à compléter."
+    )
     _scenario_override = st.session_state.get("scenario_form_data")
     preloaded_example = (
         _scenario_override
@@ -612,6 +621,14 @@ with tab2:
         unsafe_allow_html=True,
     )
     st.subheader("Validation de la facture électronique")
+    st.caption(
+        "Cette étape contrôle la conformité sur 2 niveaux : "
+        "norme européenne EN16931 puis règles DGFiP (Annexe 7)."
+    )
+    st.info(
+        "Bonnes pratiques : validez d'abord sur un document généré dans l'onglet précédent, "
+        "puis utilisez l'upload XML/PDF pour tester vos flux réels."
+    )
 
     # ── Sélecteur source ──────────────────────────────────
     xml_source = st.radio(
@@ -1076,11 +1093,12 @@ with tab2:
                 unified_info.append(("Annexe 7", issue.rule_id, issue.message))
 
         st.divider()
-        st.markdown("#### 🧭 Statut global unifié")
+        st.markdown("#### 🧭 Statut global")
         global_status = "✅ VALIDE" if len(unified_blocking) == 0 else "❌ CORRECTIONS REQUISES"
         st.metric("Statut global", global_status)
         st.caption(
-            "Déclenchement explicite confirmé : 1 clic sur 'Valider la facture' = 1 exécution de validation."
+            "Un clic sur 'Valider la facture' lance une exécution complète "
+            "(EN16931 + Annexe 7) et met à jour le résumé global."
         )
 
         c1, c2, c3 = st.columns(3)
@@ -1148,11 +1166,12 @@ with tab_audit:
     st.markdown(
         """
         <div class="section-header">
-            <div class="step-label">Parcours 0 — Point d'entrée</div>
-            <div class="step-title">Audit de votre facture actuelle</div>
+            <div class="step-label">Étape 1 — Analyse</div>
+            <div class="step-title">Audit de votre facture PDF</div>
             <p class="step-desc">
-                Uploadez n'importe quelle facture PDF. On vous dit en 10 secondes
-                si elle sera rejetée en septembre 2026 et ce qu'il faut corriger.
+                Déposez un PDF reçu aujourd’hui (par email, portail, etc.). L’outil
+                identifie rapidement les points susceptibles d’empêcher une conformité
+                à la réforme 2026 et propose des actions de correction.
             </p>
         </div>
         """,
@@ -1160,29 +1179,30 @@ with tab_audit:
     )
 
     st.info(
-        "💡 **Vous envoyez encore vos factures en PDF par email ?** "
-        "Déposez-en une ici pour voir l'impact concret de la réforme sur votre facture actuelle."
+        "Cette analyse est **heuristique** (lecture du texte du PDF). "
+        "Elle n’est pas une validation réglementaire officielle, mais un guide pour corriger en priorité "
+        "avant de générer un format structuré (Factur-X, UBL 2.1 ou CII)."
     )
 
     uploaded_pdf_audit = st.file_uploader(
-        "📂 Déposez votre facture PDF ici",
+        "Déposez votre facture PDF ici",
         type=["pdf"],
         key="audit_pdf_upload",
-        help="PDF classique, PDF Factur-X, ou tout format de facture numérique actuel.",
+        help="PDF classique (visuel), ou Factur-X (PDF/A-3 avec XML CII embarqué).",
     )
 
     if uploaded_pdf_audit:
         pdf_bytes_audit = uploaded_pdf_audit.read()
 
-        with st.spinner("🔍 Analyse de votre facture en cours..."):
+        with st.spinner("Analyse de la facture en cours..."):
             result = analyze_plain_pdf(pdf_bytes_audit)
 
         # ── Cas Factur-X détecté ──────────────────────────────────────────
         if result.is_facturx:
             st.success(
-                "✅ **Bonne nouvelle !** Ce PDF est déjà un Factur-X (XML CII embarqué détecté). "
-                "Il est conforme au format requis par la réforme 2026. "
-                "Allez dans l'onglet **Valider** pour contrôler les règles métier."
+                "Le document est détecté comme un **Factur-X** (XML CII embarqué présent). "
+                "Le format attendu par la réforme est donc déjà couvert. "
+                "Passez à l’onglet **Valider** pour contrôler les règles métier."
             )
 
         # ── PDF classique ─────────────────────────────────────────────────
@@ -1232,41 +1252,41 @@ with tab_audit:
                 col_w.metric("🟡 Avertissements", result.warning_count)
 
             st.error(
-                "❌ **Ce PDF sera automatiquement rejeté à partir du 1er septembre 2026.** "
-                f"Il présente **{result.blocking_count} point(s) bloquant(s)** à corriger."
+                "Ce PDF classique risque d’être rejeté à partir du 1er septembre 2026. "
+                f"Il présente **{result.blocking_count} point(s) bloquant(s)** à corriger avant conversion."
             )
 
             st.divider()
 
             # ── Rapport détaillé ──────────────────────────────────────────
-            st.markdown("#### 📋 Rapport de non-conformité")
+            st.markdown("#### Rapport de non-conformité (heuristique)")
 
             blocking_issues = [i for i in result.issues if i.category == "bloquant"]
             warning_issues = [i for i in result.issues if i.category == "warning"]
 
             if blocking_issues:
                 st.markdown(
-                    "**🔴 Points bloquants — doivent être corrigés avant le 1er sept. 2026**"
+                    "**Points bloquants — à corriger en priorité avant le 1er sept. 2026**"
                 )
                 for issue in blocking_issues:
-                    with st.expander(f"❌ [{issue.code}] {issue.label}", expanded=True):
-                        st.markdown(f"**Pourquoi c'est bloquant :**  \n{issue.explanation}")
-                        st.info(f"✏️ **Action corrective :** {issue.fix}")
+                    with st.expander(f"[{issue.code}] {issue.label}", expanded=True):
+                        st.markdown(f"**Pourquoi c’est bloquant :**  \n{issue.explanation}")
+                        st.info(f"Action corrective : {issue.fix}")
 
             if warning_issues:
-                st.markdown("**🟡 Points à surveiller — non bloquants mais risqués**")
+                st.markdown("**Points à surveiller — non bloquants mais risqués**")
                 for issue in warning_issues:
-                    with st.expander(f"⚠️ [{issue.code}] {issue.label}"):
-                        st.markdown(f"**Pourquoi c'est risqué :**  \n{issue.explanation}")
-                        st.info(f"✏️ **Recommandation :** {issue.fix}")
+                    with st.expander(f"[{issue.code}] {issue.label}"):
+                        st.markdown(f"**Pourquoi c’est risqué :**  \n{issue.explanation}")
+                        st.info(f"Recommandation : {issue.fix}")
 
             # ── Champs détectés ───────────────────────────────────────────
             if result.detected:
                 with st.expander("🔍 Données détectées dans votre PDF", expanded=False):
                     st.caption(
-                        "Ces informations ont été extraites heuristiquement. "
-                        "Elles ne sont pas validées — leur présence visuelle ne suffit pas "
-                        "pour être conforme à la réforme."
+                        "Chiffres et libellés détectés dans le texte. "
+                        "La présence visuelle ne suffit pas à garantir la conformité : "
+                        "le contrôle réglementaire requiert un format structuré."
                     )
                     for k, v in result.detected.items():
                         label = {
@@ -1291,12 +1311,11 @@ with tab_audit:
                     text-align: center;
                 ">
                     <div style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem;">
-                        🚀 Prêt à convertir cette facture en format conforme 2026 ?
+                        Prochaine étape : générer un format structuré conforme 2026
                     </div>
                     <div style="font-size: 0.9rem; opacity: 0.88;">
-                        Utilisez l'onglet <strong>📝 Générer une facture</strong> pour créer
-                        un Factur-X conforme, ou l'onglet <strong>🔄 Conversion XML Legacy</strong>
-                        si vous partez d'un XML existant.
+                        Utilisez l’onglet <strong>Générer une facture</strong> pour créer un Factur-X, ou "
+                        "l’onglet <strong>Conversion XML Legacy</strong> si vous partez d’un XML existant.
                     </div>
                 </div>
                 """,
@@ -1305,11 +1324,8 @@ with tab_audit:
 
     # ── Scénarios d'erreur préchargés ─────────────────────────────────────
     st.divider()
-    st.markdown("#### 🎬 Scénarios de démonstration")
-    st.caption(
-        "Pas de PDF sous la main ? Choisissez un scénario préconfiguré pour voir "
-        "le validateur en action avec des erreurs réelles."
-    )
+    st.markdown("#### Scénarios de démonstration (optionnel)")
+    st.caption("Pas de PDF sous la main ? Choisissez un scénario pour tester le parcours utilisateur.")
 
     scenarios = get_demo_scenarios()
     selected_scenario = st.selectbox(
@@ -1325,12 +1341,12 @@ with tab_audit:
         lines = scenario.get("_demo_lines", [("Prestation", 1.0, 100.0, 20.0)])
 
         if tag == "ok":
-            st.success(f"✅ **Scénario nominal** — {desc}")
+            st.success(f"Scénario nominal — {desc}")
         else:
-            st.error(f"❌ **Scénario d'erreur** — {desc}")
+            st.error(f"Scénario d'erreur — {desc}")
 
         if st.button(
-            "▶️ Charger ce scénario dans l'onglet Générer",
+            "Charger ce scénario dans l’onglet Générer",
             type="primary",
             key="load_scenario",
         ):
@@ -1340,8 +1356,7 @@ with tab_audit:
             }
             st.session_state["scenario_lines"] = lines
             st.info(
-                "✅ Scénario chargé. "
-                "Allez dans **📝 Générer une facture**, cliquez **Générer** puis **Valider**."
+                "Scénario chargé. Allez dans **Générer une facture**, cliquez **Générer**, puis **Valider**."
             )
 
 
@@ -1482,9 +1497,16 @@ with tab_legacy:
     )
     st.subheader("Conversion XML Legacy → Factur-X CII")
     st.caption(
-        "Vous avez une facture dans un format XML propriétaire (SAP, Sage, Cegid, EBP…) ? "
-        "Uploadez-la ici : le système détecte automatiquement les champs par heuristique, "
-        "vous permet de corriger les données, puis génère un XML Factur-X CII conforme à la réforme 2026."
+        "Objectif : convertir un XML métier existant vers un format structuré "
+        "conforme à la réforme 2026."
+    )
+    st.info(
+        "Parcours recommandé : importer le XML, vérifier les correspondances détectées, "
+        "corriger les champs clés si nécessaire, puis générer et valider le résultat."
+    )
+    st.caption(
+        "Formats d'entrée typiques : SAP, Sage, Cegid, EBP, ou tout XML interne. "
+        "Le mapping est heuristique : vérifiez systématiquement les données détectées."
     )
 
     col_upload, col_sample = st.columns([3, 1])
