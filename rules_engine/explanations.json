@@ -218,7 +218,7 @@
   "BR-CO-15": {
     "label": "Incohérence HT + TVA ≠ TTC",
     "explanation": "C'est l'erreur arithmétique la plus fréquente en facturation. Le total TTC doit être strictement égal au total HT + total TVA (+ arrondi optionnel). Les arrondis incorrects sur les lignes sont la cause principale.",
-    "fix": "Arrondir chaque montant de ligne à 2 décimales, recalculer les totaux HT et TVA, puis vérifier que HT + TVA = TTC.",
+    "fix": "Arrondir chaque montant de ligne à 2 décimales, Recalculez les totaux HT et TVA, puis vérifier que HT + TVA = TTC.",
     "impact": "rejet_automatique"
   },
   "BR-CO-16": {
